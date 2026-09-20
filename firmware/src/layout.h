@@ -129,4 +129,11 @@ void compute_two_rows(Rect body, int16_t gap, bool row1_has, bool row2_has, Rect
 // (trmnl-ink/docs/frame-contract.md, инвариант 1).
 void draw_frame(canvas::Canvas& canvas, const slots::Store& store, const DeviceInfo& device);
 
+// Кадр с учётными данными точки доступа (docs/decisions.md, п.8): имя сети и
+// пароль текстом — камера может не сработать, вводить руками должно быть чем
+// — и рядом QR формата WIFI: для подключения наведением камеры. Через тот же
+// Canvas, что и draw_frame, — тогда кадр снимается тем же хостовым
+// инструментом (tools/render_frame), а не только на живой панели.
+void draw_ap_credentials(canvas::Canvas& canvas, const String& ssid, const String& password);
+
 }  // namespace layout

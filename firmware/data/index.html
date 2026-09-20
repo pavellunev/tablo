@@ -222,7 +222,11 @@
   <section id="connectors-section">
     <h2>Коннекторы</h2>
     <div id="connector-list"><p class="empty">коннекторов нет</p></div>
-    <button type="button" class="secondary full" id="add-connector-btn">Добавить коннектор</button>
+    <div class="preset-row">
+      <button type="button" class="secondary" data-preset="homeassistant">Умный дом</button>
+      <button type="button" class="secondary" data-preset="rates">Курсы валют</button>
+      <button type="button" class="secondary" data-preset="custom">Свой источник</button>
+    </div>
   </section>
 
   <section id="device-section">
@@ -333,6 +337,83 @@ function renderScanList(results) {
   });
 }
 
+// Сам скан теперь выполняет главный цикл устройства, а не задача веб-сервера
+// (иначе блокирующий Wi-Fi скан валил её по сторожевому таймеру — устройство
+// перезагружалось на этой самой кнопке). /api/scan отвечает немедленно тем,
+// что уже есть в кеше, и признаком scanning — пока он true, результат может
+// быть пустым или устаревшим, спрашиваем ещё раз через полторы секунды.
+function pollScan() {
+  fetchJSON('/api/scan').then(function (res) {
+    renderScanList(res.networks || []);
+    if (res.scanning) {
+      setStatus('сканируем…');
+      setTimeout(pollScan, 1500);
+    } else {
+      setStatus('');
+    }
+  }).catch(function (err) { setStatus('сканирование не удалось: ' + err.message); });
+}
+
+
+// Готовые источники. Человеку нечего знать про id и про то, какой путь в JSON
+// ведёт к курсу биткоина: он выбирает «умный дом» или «курсы валют», а поля
+// для заполнения остаются только те, которых не знает никто, кроме него, —
+// адрес его сервера и его токен.
+function makePreset(kind) {
+  var stamp = Date.now().toString(36).slice(-4);
+  if (kind === 'homeassistant') {
+    return {
+      id: 'home-' + stamp,
+      title: 'Умный дом',
+      kind: 'homeassistant',
+      url: '',
+      urlHint: 'http://192.168.1.2:8123',
+      interval: 300,
+      token: '', token_set: false, insecure: false,
+      fields: [
+        { slot: 'co2',           label: 'Датчик CO₂',        hint: 'sensor.co2',            ttl: 300 },
+        { slot: 'tvoc',          label: 'Датчик TVOC',       hint: 'sensor.air_quality',    ttl: 300 },
+        { slot: 'weather.temp',  label: 'Погода',            hint: 'weather.home',          ttl: 3600 }
+      ],
+      map: []
+    };
+  }
+  if (kind === 'rates') {
+    // Публичные источники, ключей не требуют — заполнено целиком, человеку
+    // остаётся только нажать «Сохранить».
+    return {
+      id: 'rates-' + stamp,
+      title: 'Курсы валют',
+      kind: 'http',
+      url: 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+      interval: 300,
+      token: '', token_set: false, insecure: false,
+      fields: [],
+      map: [{ slot: 'btc', source: 'bitcoin.usd', ttl: 300 }]
+    };
+  }
+  return {
+    id: 'custom-' + stamp,
+    title: 'Свой источник',
+    kind: 'http',
+    url: '',
+    urlHint: 'https://example.com/data.json',
+    interval: 300,
+    token: '', token_set: false, insecure: false,
+    fields: [],
+    map: [],
+    custom: true
+  };
+}
+
+// Что показывает кадр — список слотов для ручной привязки в «своём источнике».
+var SLOTS = [
+  ['btc', 'Курс BTC'], ['usd_rub', 'Доллар'], ['eur_rub', 'Евро'],
+  ['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура'],
+  ['limit.claude.5h', 'Claude, 5 часов'], ['limit.claude.week', 'Claude, неделя'],
+  ['limit.codex', 'GPT'], ['mail.unread', 'Непрочитанных писем']
+];
+
 function showAddForm(ssid, secure) {
   pendingSsid = ssid;
   pendingSecure = secure;
@@ -399,10 +480,7 @@ document.addEventListener('click', function (e) {
 
   if (t.id === 'scan-btn') {
     setStatus('сканируем…');
-    fetchJSON('/api/scan').then(function (list) {
-      renderScanList(list);
-      setStatus('');
-    }).catch(function (err) { setStatus('сканирование не удалось: ' + err.message); });
+    pollScan();
   }
 
   if (t.dataset && t.dataset.pickSsid !== undefined) {
@@ -417,8 +495,8 @@ document.addEventListener('click', function (e) {
     renderNetworks();
   }
 
-  if (t.id === 'add-connector-btn') {
-    state.connectors.push({ id: '', kind: 'http', url: '', interval: 300, token: '', token_set: false, insecure: false });
+  if (t.dataset.preset) {
+    state.connectors.push(makePreset(t.dataset.preset));
     renderConnectors();
   }
 

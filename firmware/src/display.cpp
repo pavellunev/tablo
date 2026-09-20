@@ -111,38 +111,20 @@ void show_frame(const slots::Store& store, const layout::DeviceInfo& device) {
 }
 
 void show_ap_credentials(const String& ssid, const String& password) {
-    // Частичное обновление — тот же приём, что и в show_status: полное
+    // Частичное обновление — тот же приём, что и в show_frame: полное
     // моргает секунду, а этот кадр висит на экране, пока не найдётся
     // сохранённая сеть, то есть потенциально всю поездку до первой настройки.
+    //
+    // Через canvas::CanvasGxEPD2 и layout::draw_ap_credentials — та же пара,
+    // что рисует основной кадр (show_frame): растровый шрифт Terminus вместо
+    // латиницы Adafruit_GFX и QR через wifi_qr, а не отдельная реализация
+    // здесь. Это же делает кадр снимаемым хостовым инструментом
+    // (tools/render_frame) для проверки без устройства.
     epd.setPartialWindow(0, 0, board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
+    canvas::CanvasGxEPD2<Panel> canvas(epd);
     epd.firstPage();
     do {
-        epd.fillScreen(GxEPD_WHITE);
-        epd.setTextColor(GxEPD_BLACK);
-
-        epd.setTextSize(2);
-        epd.setCursor(20, 40);
-        epd.print("connect to set up inkroam");
-
-        epd.setTextSize(1);
-        epd.setCursor(20, 90);
-        epd.print("network:");
-        // Кегль — целое число, кратное встроенному растровому шрифту (см.
-        // docs/decisions.md, п.6: дробный масштаб рвёт штрихи).
-        epd.setTextSize(3);
-        epd.setCursor(20, 115);
-        epd.print(ssid);
-
-        epd.setTextSize(1);
-        epd.setCursor(20, 190);
-        epd.print("password:");
-        epd.setTextSize(4);
-        epd.setCursor(20, 220);
-        epd.print(password);
-
-        epd.setTextSize(1);
-        epd.setCursor(20, board::SCREEN_HEIGHT - 30);
-        epd.print("join this network on your phone, then open the setup page");
+        layout::draw_ap_credentials(canvas, ssid, password);
     } while (epd.nextPage());
 }
 

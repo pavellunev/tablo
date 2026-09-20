@@ -146,6 +146,19 @@ bool render(const slots::Store& store, const layout::DeviceInfo& device, const s
     return ok;
 }
 
+// Кадр точки доступа (docs/decisions.md, п.8) — отдельный сценарий: своя
+// раскладка (layout::draw_ap_credentials), не draw_frame. ssid/password —
+// не выдумка, а то же самое значение, которое проверяется распознаванием QR
+// со снятого PNG (см. Status Log в .claude/plans/inkroam.md): если тут и в
+// проверке разойдётся строка — расхождение сразу увидит тот, кто это читает.
+bool render_ap_credentials(const std::string& path) {
+    canvas::CanvasMemory canvas(800, 480);
+    layout::draw_ap_credentials(canvas, "inkroam-setup", "23456789AB");
+    bool ok = canvas.save_png(path);
+    std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
+    return ok;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -164,6 +177,7 @@ int main(int argc, char** argv) {
     ok &= render(build_full_scenario(), device, out_dir + "/full.png");
     ok &= render(build_degraded_scenario(), device, out_dir + "/degraded.png");
     ok &= render(build_empty_scenario(), device, out_dir + "/empty.png");
+    ok &= render_ap_credentials(out_dir + "/ap_credentials.png");
 
     return ok ? 0 : 1;
 }

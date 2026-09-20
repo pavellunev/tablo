@@ -26,6 +26,7 @@
 #include "../assets/plexmono_28.h"
 #include "../assets/plexmono_41.h"
 #include "font.h"
+#include "wifi_qr.h"
 
 namespace layout {
 
@@ -974,6 +975,80 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device) {
                          Color::Black);
         }
     }
+}
+
+namespace {
+
+// ── экран учётных данных точки доступа (docs/decisions.md, п.8) ──
+//
+// Раскладка: слева текстом сеть и пароль (камера может не сработать — тогда
+// вводят руками), справа — QR той же информации в формате WIFI:. Разнесены
+// зазором AP_QR_GAP, а не поставлены впритык, — иначе QR читается как
+// приклеенный сбоку довесок, а не равноправная часть кадра.
+constexpr int16_t AP_TITLE_Y = 34;          // базовая линия заголовка, как у даты в шапке (draw_header)
+constexpr int16_t AP_BODY_TOP = 82;         // под линией под заголовком
+constexpr uint8_t AP_QR_MODULE_PX = 6;      // ≥4-5px на модуль — читается с руки на 800x480
+constexpr uint8_t AP_QR_QUIET_MODULES = 4;  // обязательная светлая рамка по спецификации QR
+constexpr int16_t AP_QR_GAP = 30;
+
+}  // namespace
+
+void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& password) {
+    canvas.fill(Color::White);
+
+    draw_text(canvas, fonts::Terminus24, MARGIN, AP_TITLE_Y, "НАСТРОЙКА INKROAM", Color::Black, 1,
+              /*bold=*/true);
+    canvas.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(canvas.width() - 2 * MARGIN), 2,
+                     Color::Black);
+
+    int16_t body_bottom = static_cast<int16_t>(canvas.height() - MARGIN);
+    int16_t body_h = static_cast<int16_t>(body_bottom - AP_BODY_TOP);
+
+    int16_t qr_side = wifi_qr::side_for(AP_QR_MODULE_PX, AP_QR_QUIET_MODULES);
+    int16_t qr_x = static_cast<int16_t>(canvas.width() - MARGIN - qr_side);
+    int16_t qr_y = static_cast<int16_t>(AP_BODY_TOP + (body_h - qr_side) / 2);
+
+    String payload = wifi_qr::payload(ssid, password);
+    // draw() возвращает 0, если payload не поместился в фиксированную версию
+    // QR (wifi_qr.h) — молча не рисуем код, а не роняем весь кадр: имя сети и
+    // пароль текстом ниже остаются рабочим способом подключиться руками.
+    wifi_qr::draw(canvas, qr_x, qr_y, payload, AP_QR_MODULE_PX, AP_QR_QUIET_MODULES);
+
+    // Текстовая колонка слева от QR — та же ширина, что осталась после него
+    // и зазора, а не фиксированное число: так верстка не разъедется, если
+    // геометрию QR однажды придётся поменять.
+    int16_t text_w = static_cast<int16_t>(qr_x - AP_QR_GAP - MARGIN);
+
+    int16_t y = static_cast<int16_t>(AP_BODY_TOP + (body_h - 260) / 2);  // 260 — высота блока текста ниже
+
+    // Terminus, не PlexMono: у PlexMono в наборе только цифры и пунктуация
+    // (используется для курсов и процентов) — букв SSID/пароля в нём просто
+    // нет, глиф молча не рисуется (font.h: find_glyph возвращает nullptr, а
+    // draw_text пропускает символ). Terminus покрывает весь ASCII.
+    draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "СЕТЬ");
+    y = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET + 34);
+    draw_text(canvas, fonts::Terminus24, MARGIN, y,
+              truncate_to_width(fonts::Terminus24, ssid.c_str(), text_w).c_str(), Color::Black, 1,
+              /*bold=*/true);
+
+    y = static_cast<int16_t>(y + 50);
+    draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "ПАРОЛЬ");
+    y = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET + 56);
+    // Terminus24 при scale=2 — тот же приём, что курс BTC в блоке Рынков
+    // (см. font.h про kern 48 без пятого файла шрифта): пароль должен быть
+    // зрительно доминирующим, чтобы его можно было перепечатать со стола без
+    // наклона к панели. Алфавит пароля (config.cpp) фиксирован по длине (10
+    // символов) — можно рисовать без truncate_to_width, переполнения не
+    // бывает даже с запасом по ширине колонки.
+    draw_text(canvas, fonts::Terminus24, MARGIN, y, password.c_str(), Color::Black, 2,
+              /*bold=*/true);
+
+    y = static_cast<int16_t>(y + 60);
+    draw_text(canvas, fonts::Terminus14, MARGIN, y,
+              "наведите камеру телефона на QR — сеть добавится сама,", Color::Black, 1, false);
+    y = static_cast<int16_t>(y + 22);
+    draw_text(canvas, fonts::Terminus14, MARGIN, y,
+              "не считалось — введите сеть и пароль вручную.", Color::Black, 1, false);
 }
 
 }  // namespace layout

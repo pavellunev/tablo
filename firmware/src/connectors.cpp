@@ -136,6 +136,30 @@ std::vector<ParsedSlot> parse_http_response(const String& json_body,
     if (deserializeJson(doc, json_body.c_str())) return result;
     JsonVariantConst root = doc.as<JsonVariantConst>();
 
+    // Пустая карта — ответ сам является словарём слотов: имя → объект с
+    // полями text/number/delta/age/ttl. Так отдаёт домашнее приложение, уже
+    // сходившее во все источники. Выписывать для него карту из десятка
+    // одинаковых строк незачем, а число и изменение так доезжают целиком —
+    // через путь к тексту приехала бы только подпись, и шкалы с графиками
+    // остались бы пустыми.
+    if (map.empty()) {
+        JsonObjectConst obj = root.as<JsonObjectConst>();
+        if (obj.isNull()) return result;
+        for (JsonPairConst kv : obj) {
+            JsonVariantConst v = kv.value();
+            if (!v.is<JsonObjectConst>()) continue;
+
+            slots::Slot value;
+            value.text = String(v["text"] | "");
+            value.number = v["number"] | 0.0f;
+            value.delta = v["delta"] | 0.0f;
+            value.ttl = v["ttl"] | 900;
+            value.ok = value.text.length() > 0;
+            if (value.ok) result.push_back(ParsedSlot{String(kv.key().c_str()), value});
+        }
+        return result;
+    }
+
     for (const config::SlotMapping& m : map) {
         slots::Slot value;
         value.ttl = m.ttl;
@@ -278,14 +302,23 @@ void poll_due(const std::vector<config::Connector>& list, slots::Store& store, u
         if (c.kind == "http") {
             String body;
             if (!fetch(c.url, c.token, c.insecure, body)) {
+                // Отказ источника — рабочая ситуация, а не авария: слоты
+                // гаснут, блок уходит с кадра, остальное живёт. Но в лог это
+                // писать обязательно: без строки здесь «почему пусто на
+                // экране» выясняется только разбором с кабелем.
+                Serial.printf("коннектор «%s»: источник не ответил\n", c.id.c_str());
                 store.mark_failed(c.id);
                 continue;
             }
+            size_t taken = 0;
             for (const ParsedSlot& parsed : parse_http_response(body, c.map)) {
                 slots::Slot value = parsed.value;
                 value.at = now;
                 store.put(parsed.id, value, c.id);
+                ++taken;
             }
+            Serial.printf("коннектор «%s»: получено значений %u\n", c.id.c_str(),
+                          static_cast<unsigned>(taken));
         } else if (c.kind == "homeassistant") {
             // Один GET на entity: у Home Assistant REST нет способа запросить
             // несколько состояний одним запросом без шаблонов Jinja, а

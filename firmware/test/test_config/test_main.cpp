@@ -202,6 +202,66 @@ static void test_from_json_missing_insecure_defaults_to_false() {
     TEST_ASSERT_FALSE(settings.connectors[0].insecure);
 }
 
+// ── ap_password_from_bytes: пароль точки доступа собирается из потока
+// случайных байт чистой функцией (docs/decisions.md, п.8) — esp_random()
+// недоступен на хосте, поэтому источник случайности инъецируется байтами
+// прямо в тесте.
+
+static void test_ap_password_from_bytes_maps_through_alphabet() {
+    uint8_t bytes[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    String password = config::ap_password_from_bytes(bytes, 10);
+
+    TEST_ASSERT_EQUAL_STRING("23456789AB", password.c_str());
+}
+
+static void test_ap_password_from_bytes_wraps_modulo_alphabet_length() {
+    // 32 и 255 — соответственно первый индекс после полного круга по
+    // 32-символьному алфавиту и последний валидный байт: оба должны попасть
+    // в алфавит через `% kApPasswordAlphabetLen`, а не выйти за его границы.
+    uint8_t bytes[2] = {32, 255};
+    String password = config::ap_password_from_bytes(bytes, 2);
+
+    TEST_ASSERT_EQUAL_STRING("2Z", password.c_str());
+}
+
+// ── пароль точки доступа — секрет наравне с токеном коннектора: не должен
+// уходить наружу через to_json(..., false)/GET /api/config. Ревью уже нашло
+// один такой пропуск для токенов (см. тесты выше) — тот же класс ошибки
+// возможен и здесь, если про новое поле забыть при следующей правке.
+
+static void test_to_json_without_secrets_hides_ap_password() {
+    config::Settings settings;
+    settings.ap_password = "SECRETPASS";
+
+    String json = config::to_json(settings, /*include_secrets=*/false);
+
+    TEST_ASSERT_NULL(strstr(json.c_str(), "SECRETPASS"));
+}
+
+static void test_to_json_with_secrets_includes_ap_password() {
+    config::Settings settings;
+    settings.ap_password = "SECRETPASS";
+
+    // Внутреннее хранилище (config::save) обязано сохранять пароль — без
+    // этого пути он не пережил бы перезагрузку.
+    String json = config::to_json(settings, /*include_secrets=*/true);
+
+    TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "SECRETPASS"));
+}
+
+static void test_from_json_missing_ap_password_keeps_previous() {
+    config::Settings settings;
+    settings.ap_password = "SECRETPASS";
+
+    // Страница настройки это поле никогда не присылает (его там просто нет
+    // в форме) — отсутствие в присланном JSON обязано означать «не трогали»,
+    // а не стирать единственный постоянный пароль точки доступа.
+    String payload = "{}";
+    config::from_json(payload, settings);
+
+    TEST_ASSERT_EQUAL_STRING("SECRETPASS", settings.ap_password.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -216,6 +276,12 @@ int main() {
     RUN_TEST(test_to_json_without_secrets_hides_password_and_token);
     RUN_TEST(test_to_json_with_secrets_includes_password_and_token);
     RUN_TEST(test_from_json_missing_insecure_defaults_to_false);
+
+    RUN_TEST(test_ap_password_from_bytes_maps_through_alphabet);
+    RUN_TEST(test_ap_password_from_bytes_wraps_modulo_alphabet_length);
+    RUN_TEST(test_to_json_without_secrets_hides_ap_password);
+    RUN_TEST(test_to_json_with_secrets_includes_ap_password);
+    RUN_TEST(test_from_json_missing_ap_password_keeps_previous);
 
     return UNITY_END();
 }

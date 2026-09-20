@@ -63,25 +63,30 @@ void send_forbidden(AsyncWebServerRequest* request) {
     request->send(403, "application/json", "{\"ok\":false,\"error\":\"forbidden\"}");
 }
 
-String scan_to_json() {
+void handle_scan(AsyncWebServerRequest* request) {
+    // scan_status(), не scan(): та блокирует на время реального Wi-Fi скана
+    // (до ~10с) — вызванная прямо из этого обработчика (задача async_tcp, у
+    // неё свой сторожевой таймер и ограниченный стек), она валила устройство
+    // в перезагрузку на кнопке «Сканировать сети» на странице настройки.
+    // scan_status() не блокируется сама никогда: если кеш устарел, только
+    // просит главный цикл обновить его и сразу отдаёт то, что есть.
+    netman::ScanSnapshot snap = netman::scan_status();
+
     JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-    // scan_cached(), не scan(): страница настройки дёргает /api/scan заметно
-    // чаще, чем меняется эфир, а сам скан блокирует Wi-Fi-стек на ~10 секунд
-    // — в это время веб-сервер не отвечает вовсе ни на что (см. netman.h).
-    for (const auto& r : netman::scan_cached()) {
+    JsonArray arr = doc["networks"].to<JsonArray>();
+    for (const auto& r : snap.networks) {
         JsonObject o = arr.add<JsonObject>();
         o["ssid"] = r.ssid;
         o["rssi"] = r.rssi;
         o["secure"] = r.secure;
     }
+    // scanning=true — список выше может быть пустым или устаревшим, страница
+    // должна спросить ещё раз через секунду-другую (см. netman::scan_status()).
+    doc["scanning"] = snap.scanning;
+
     String out;
     serializeJson(doc, out);
-    return out;
-}
-
-void handle_scan(AsyncWebServerRequest* request) {
-    request->send(200, "application/json", scan_to_json());
+    request->send(200, "application/json", out);
 }
 
 void handle_get_config(AsyncWebServerRequest* request) {
@@ -150,7 +155,11 @@ void handle_not_found(AsyncWebServerRequest* request) {
 }  // namespace
 
 void begin() {
-    if (!LittleFS.begin(/*formatOnFail=*/true)) {
+    // Метку раздела передаём явно: LittleFS.begin() по умолчанию ищет раздел
+    // с именем «spiffs», а у нас в partitions.csv он назван «littlefs» — без
+    // этого файловая система не монтируется и страница настройки не
+    // отдаётся, хотя залита и лежит на месте.
+    if (!LittleFS.begin(/*formatOnFail=*/true, "/littlefs", 10, "littlefs")) {
         Serial.println("portal: LittleFS не поднялась");
     }
 

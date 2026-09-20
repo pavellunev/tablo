@@ -314,6 +314,39 @@ static void test_homeassistant_missing_state_does_not_set_ok() {
     TEST_ASSERT_FALSE(ok);
 }
 
+
+// ── ответ как словарь слотов ───────────────────────────────────────────
+
+void test_empty_map_reads_slot_dictionary(void) {
+    // Так отдаёт домашнее приложение: имя слота → объект со значением.
+    // Число и изменение должны доехать целиком, иначе шкалы и графики
+    // останутся пустыми при заполненной подписи.
+    const char* body =
+        "{\"btc\":{\"text\":\"80 689\",\"number\":80689.0,\"delta\":-1.13,\"age\":12,\"ttl\":300},"
+        "\"co2\":{\"text\":\"798\",\"number\":798.0,\"delta\":92.0,\"age\":5,\"ttl\":300}}";
+
+    auto parsed = connectors::parse_http_response(String(body), {});
+
+    TEST_ASSERT_EQUAL_UINT32(2, parsed.size());
+    for (const auto& p : parsed) {
+        if (p.id == String("btc")) {
+            TEST_ASSERT_EQUAL_STRING("80 689", p.value.text.c_str());
+            TEST_ASSERT_EQUAL_FLOAT(80689.0f, p.value.number);
+            TEST_ASSERT_EQUAL_FLOAT(-1.13f, p.value.delta);
+            TEST_ASSERT_EQUAL_UINT32(300, p.value.ttl);
+            TEST_ASSERT_TRUE(p.value.ok);
+        }
+    }
+}
+
+void test_empty_map_skips_entries_without_text(void) {
+    // Слот без подписи показывать нечем — пропускаем, а не рисуем пустоту.
+    const char* body = "{\"btc\":{\"number\":1.0},\"co2\":{\"text\":\"798\",\"number\":798.0}}";
+    auto parsed = connectors::parse_http_response(String(body), {});
+    TEST_ASSERT_EQUAL_UINT32(1, parsed.size());
+    TEST_ASSERT_EQUAL_STRING("co2", parsed[0].id.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -347,6 +380,9 @@ int main() {
     RUN_TEST(test_homeassistant_state_with_unit);
     RUN_TEST(test_homeassistant_state_without_unit);
     RUN_TEST(test_homeassistant_missing_state_does_not_set_ok);
+
+    RUN_TEST(test_empty_map_reads_slot_dictionary);
+    RUN_TEST(test_empty_map_skips_entries_without_text);
 
     return UNITY_END();
 }

@@ -1,7 +1,6 @@
 #include "netman.h"
 
 #include <WiFi.h>
-#include <esp_random.h>
 
 #include <atomic>
 
@@ -41,32 +40,6 @@ uint32_t disconnected_since_ms = 0;  // 0 — сейчас подключены 
 String current_ap_ssid;
 String current_ap_password;
 
-// Алфавит пароля точки доступа (docs/decisions.md, п.8) — без символов,
-// которые легко перепутать, читая мелкий растровый шрифт с панели и потом
-// набирая на экранной клавиатуре телефона: 0/O, 1/l/I выброшены. Только
-// заглавные — набирать их с телефона не сложнее (первый тап уже даёт
-// заглавный регистр), а вариантов начертания меньше.
-constexpr char kApPasswordAlphabet[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-constexpr size_t kApPasswordAlphabetLen = sizeof(kApPasswordAlphabet) - 1;
-
-// WPA2-Personal требует минимум 8 символов пароля — 10 даёт запас и хорошую
-// энтропию (32^10 ≈ 2^50) при том, что от стола его всё ещё можно перепечатать
-// без ошибок за один заход.
-constexpr size_t kApPasswordLength = 10;
-
-// esp_random() — источник случайности прямо здесь, а не параметром, как в
-// удалённом auth.cpp: там инъекция была нужна ради чистых функций под тесты
-// на хосте, а netman.cpp и так завязан на WiFi.h и на устройстве целиком —
-// тестировать эту функцию на хосте всё равно нечем.
-String generate_ap_password() {
-    char buf[kApPasswordLength + 1];
-    for (size_t i = 0; i < kApPasswordLength; ++i) {
-        buf[i] = kApPasswordAlphabet[esp_random() % kApPasswordAlphabetLen];
-    }
-    buf[kApPasswordLength] = '\0';
-    return String(buf);
-}
-
 // portal.cpp (обработчик /api/config) выполняется в задаче async_tcp, а не в
 // loop(). reload() зовётся оттуда и не может напрямую трогать
 // current_settings — try_connect_best() в этот момент способен перебирать
@@ -77,25 +50,54 @@ String generate_ap_password() {
 // начале своего тика, перечитывая уже сохранённые в NVS настройки.
 std::atomic<bool> settings_reload_pending{false};
 
+// Настройки только что сохранены со страницы — подключиться нужно сразу, не
+// дожидаясь ухода клиента с точки доступа. Обычное правило «не трогать
+// станцию, пока кто-то подключён» здесь работает против владельца: он ввёл
+// сеть и как раз поэтому подключён, а переход не наступает никогда.
+bool connect_now = false;
+
 // WiFi.scanNetworks() внутри освобождает результат предыдущего скана —
-// portal.cpp дёргает scan()/scan_cached() из задачи async_tcp (/api/scan),
-// пока try_connect_best() сканирует из главного цикла на периодической
-// попытке вернуться из точки доступа. Мьютекс сериализует доступ к сканеру.
-// Ленивая инициализация — не глобальный конструктор: на некоторых сборках
-// ESP32 Arduino статические объекты с side-effect могут отработать раньше,
-// чем поднят FreeRTOS, а xSemaphoreCreateMutex() до старта планировщика — это
-// undefined behavior.
-SemaphoreHandle_t scan_mutex() {
+// сериализуем доступ к сканеру мьютексом. Раньше этот же мьютекс защищал и
+// саму блокирующую операцию (WiFi.scanNetworks(), до ~10с), и кеш результатов
+// — а брал его в том числе /api/scan прямо из задачи async_tcp. Если в этот
+// момент главный цикл уже держал мьютекс, выполняя скан, async_tcp ждал его
+// освобождения ДО 10 СЕКУНД — у этой задачи свой сторожевой таймер и
+// ограниченный стек, и оба не переживают такую паузу: устройство
+// перезагружалось на кнопке «Сканировать сети» на странице настройки.
+//
+// Два разных мьютекса решают это разделением ролей:
+// - scan_op_mutex сериализует саму блокирующую операцию и берётся только из
+//   главного цикла (try_connect_best() и обработка scan_requested в loop());
+// - cache_mutex защищает исключительно копирование вектора cached_scan_results
+//   и держится микросекунды — его безопасно брать откуда угодно, в том числе
+//   из async_tcp, независимо от того, идёт ли сейчас скан.
+//
+// Ленивая инициализация обоих — не глобальный конструктор: на некоторых
+// сборках ESP32 Arduino статические объекты с side-effect могут отработать
+// раньше, чем поднят FreeRTOS, а xSemaphoreCreateMutex() до старта
+// планировщика — это undefined behavior.
+SemaphoreHandle_t scan_op_mutex() {
+    static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
+    return mutex;
+}
+
+SemaphoreHandle_t cache_mutex() {
     static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
     return mutex;
 }
 
 std::vector<ScanResult> cached_scan_results;
 uint32_t cached_scan_at_ms = 0;
-// Эфир в помещении не меняется по несколько раз в секунду — 5 секунд кеша
-// не заметны владельцу, а /api/scan перестаёт держать веб-сервер по 10 секунд
-// на каждый опрос страницы настройки.
+// Эфир в помещении не меняется по несколько раз в секунду — 5 секунд кеша не
+// заметны владельцу, а старее — главный цикл сам поставит скан на обновление
+// (см. scan_status()/scan_requested ниже), не блокируя того, кто спрашивает.
 constexpr uint32_t kScanCacheMs = 5000;
+
+// Запрошен ли скан (главным циклом ещё не начат) и идёт ли он прямо сейчас —
+// то же разделение флагов, что у settings_reload_pending/reboot_pending
+// (portal.cpp): async_tcp только просит, физическую работу делает loop().
+std::atomic<bool> scan_requested{false};
+std::atomic<bool> scan_running{false};
 
 std::vector<ScanResult> scan_locked() {
     std::vector<ScanResult> results;
@@ -134,12 +136,31 @@ std::vector<ScanResult> scan_locked() {
 void start_access_point(const config::Settings& settings) {
     String name = settings.device_name.isEmpty() ? "inkroam-setup" : settings.device_name;
 
-    // Пароль новый при каждом поднятии AP (docs/decisions.md, п.8): точка
-    // доступа — не «пара минут настройки», а устойчивое состояние на всё
-    // время без сохранённой сети в эфире, и открытой она быть не может —
-    // запись настроек разрешена только с её интерфейса (portal.cpp,
-    // authorized()), так что пароль на входе — единственная преграда.
-    current_ap_password = generate_ap_password();
+    // Пароль постоянный — сгенерирован один раз в config::load() и живёт в
+    // NVS (docs/decisions.md, п.8): вводить новый при каждом подъёме точки
+    // неудобно и ничего не даёт, пароль всё равно виден на экране любому
+    // рядом. Точка всё так же не может быть открытой — запись настроек
+    // разрешена только с её интерфейса (portal.cpp, authorized()), пароль на
+    // входе — единственная преграда для постороннего, до устройства не
+    // добиравшегося.
+    //
+    // Пустым сюда попасть не должно: config::load() генерирует и сохраняет
+    // пароль ещё до того, как settings попадёт в этот код (был баг именно на
+    // этом пути — ранний return из load() пропускал генерацию целиком).
+    // Проверка здесь — защита на случай будущей регрессии или сбоя NVS:
+    // WiFi.softAP() с пустой строкой поднимает ОТКРЫТУЮ сеть, а открытая
+    // точка — дыра размером с дом (см. шапку docs/decisions.md, п.8, про
+    // POST /api/config с чужого адреса). Отказаться и сказать в лог лучше,
+    // чем молча раздавать сеть без пароля.
+    if (settings.ap_password.isEmpty()) {
+        Serial.println(
+            "netman: пароль точки доступа пуст — точка НЕ поднята (docs/decisions.md, п.8)");
+        current_ap_ssid = String();
+        current_ap_password = String();
+        return;
+    }
+
+    current_ap_password = settings.ap_password;
     current_ap_ssid = name;
     WiFi.softAP(name.c_str(), current_ap_password.c_str());
 
@@ -150,22 +171,49 @@ void start_access_point(const config::Settings& settings) {
 }  // namespace
 
 std::vector<ScanResult> scan() {
-    if (xSemaphoreTake(scan_mutex(), portMAX_DELAY) != pdTRUE) return {};
+    // Блокирует на время реального Wi-Fi скана (до ~10с) — вызывать только из
+    // главного цикла (try_connect_best() и обработчик scan_requested в
+    // loop()), никогда из задачи async_tcp. Для неё — scan_status() ниже.
+    if (xSemaphoreTake(scan_op_mutex(), portMAX_DELAY) != pdTRUE) return {};
     std::vector<ScanResult> results = scan_locked();
-    xSemaphoreGive(scan_mutex());
+    xSemaphoreGive(scan_op_mutex());
     return results;
 }
 
-std::vector<ScanResult> scan_cached() {
-    if (xSemaphoreTake(scan_mutex(), portMAX_DELAY) != pdTRUE) return {};
-    uint32_t now = millis();
-    if (cached_scan_at_ms == 0 || now - cached_scan_at_ms >= kScanCacheMs) {
-        cached_scan_results = scan_locked();
-        cached_scan_at_ms = now;
+void request_scan() {
+    // Не блокирует и не сканирует сама — только просит главный цикл сделать
+    // это на следующем тике loop(). Идемпотентно: пока скан уже идёт,
+    // повторный вызов (например, очередной /api/scan со страницы настройки,
+    // пока предыдущий ещё выполняется) ничего не переставляет в очередь.
+    if (!scan_running.load(std::memory_order_relaxed)) {
+        scan_requested.store(true, std::memory_order_relaxed);
     }
-    std::vector<ScanResult> results = cached_scan_results;
-    xSemaphoreGive(scan_mutex());
-    return results;
+}
+
+bool scan_pending() {
+    return scan_requested.load(std::memory_order_relaxed) ||
+           scan_running.load(std::memory_order_relaxed);
+}
+
+ScanSnapshot scan_status() {
+    // cache_mutex() держится микросекунды (копирование вектора) — безопасно
+    // звать откуда угодно, включая задачу async_tcp (portal.cpp, /api/scan),
+    // в отличие от scan_op_mutex выше, который может быть занят до 10с.
+    std::vector<ScanResult> results;
+    bool stale;
+    if (xSemaphoreTake(cache_mutex(), portMAX_DELAY) == pdTRUE) {
+        results = cached_scan_results;
+        stale = cached_scan_at_ms == 0 || millis() - cached_scan_at_ms >= kScanCacheMs;
+        xSemaphoreGive(cache_mutex());
+    } else {
+        stale = true;
+    }
+
+    // Кеш устарел (или его ещё не было) — просим главный цикл обновить его;
+    // сам этот вызов не блокируется и не ждёт результата.
+    if (stale) request_scan();
+
+    return ScanSnapshot{std::move(results), stale || scan_pending()};
 }
 
 namespace {
@@ -233,7 +281,25 @@ void loop() {
             // введённый на странице настройки пароль незачем откладывать на
             // минуту по расписанию kApRetryIntervalMs.
             last_retry_at = millis() - kApRetryIntervalMs;
+            connect_now = true;
         }
+    }
+
+    // Скан по запросу со страницы настройки (/api/scan -> scan_status() ->
+    // request_scan()) — единственное место, где действительно выполняется
+    // блокирующий WiFi.scanNetworks() для этого пути: главный цикл, не
+    // async_tcp. До этой правки блокировку на ~10с делала сама задача
+    // веб-сервера — и падала по сторожевому таймеру (см. docs/decisions.md,
+    // п.8, комментарий у scan_op_mutex/cache_mutex выше).
+    if (scan_requested.exchange(false, std::memory_order_relaxed)) {
+        scan_running.store(true, std::memory_order_relaxed);
+        std::vector<ScanResult> results = scan();
+        if (xSemaphoreTake(cache_mutex(), portMAX_DELAY) == pdTRUE) {
+            cached_scan_results = std::move(results);
+            cached_scan_at_ms = millis();
+            xSemaphoreGive(cache_mutex());
+        }
+        scan_running.store(false, std::memory_order_relaxed);
     }
 
     if (current_mode == Mode::kAccessPoint) {
@@ -243,13 +309,18 @@ void loop() {
         // Раньше это было терпимо: настроить можно было и из домашней сети.
         // Теперь точка доступа — единственный путь, и сохранение, попавшее в
         // окно попытки, просто не дойдёт.
-        if (WiFi.softAPgetStationNum() > 0) {
+        // Исключение — сразу после сохранения настроек: владелец ввёл сеть и
+        // ждёт перехода, а он подключён к точке именно потому, что настраивал.
+        // Без этого исключения переход не наступает вовсе.
+        if (!connect_now && WiFi.softAPgetStationNum() > 0) {
             last_retry_at = millis();  // отсчёт с ухода последнего клиента
             return;
         }
 
         if (millis() - last_retry_at < kApRetryIntervalMs) return;
         last_retry_at = millis();
+
+        connect_now = false;
 
         if (try_connect_best(current_settings)) {
             WiFi.softAPdisconnect(/*wifioff=*/false);  // радио остаётся в AP_STA, гасим только вещание

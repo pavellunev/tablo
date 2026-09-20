@@ -11,6 +11,7 @@
 #include "../../src/canvas.cpp"
 #include "../../src/canvas_mem.cpp"
 #include "../../src/font.cpp"
+#include "../../src/wifi_qr.cpp"  // layout.cpp зовёт wifi_qr:: в draw_ap_credentials
 #include "../../src/layout.cpp"
 #include "../../src/slots.cpp"
 
