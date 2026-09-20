@@ -19,6 +19,12 @@
 #include "../assets/terminus_16.h"
 #include "../assets/terminus_20.h"
 #include "../assets/terminus_24.h"
+#include "../assets/plexmono_14.h"
+#include "../assets/plexmono_16.h"
+#include "../assets/plexmono_20.h"
+#include "../assets/plexmono_25.h"
+#include "../assets/plexmono_28.h"
+#include "../assets/plexmono_41.h"
 #include "font.h"
 
 namespace layout {
@@ -80,14 +86,6 @@ void civil_from_days(int64_t z, int* year, unsigned* month, unsigned* day) {
 // прецедент connectors.cpp: строки собираются через snprintf/std::string, а
 // не через operator+, которого нет в тестовом шиме). ──
 
-String format_decimal(float value, int decimals) {
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.*f", decimals, static_cast<double>(value));
-    for (char* p = buf; *p; ++p) {
-        if (*p == '.') *p = ',';
-    }
-    return String(buf);
-}
 
 // "▼0,37%" — стрелка направления плюс модуль изменения. Общая для BTC и
 // USD/RUB, EUR/RUB: в эталоне дельта есть у каждой котировки.
@@ -349,10 +347,11 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
 
 // ── рынки (левая колонка верхнего ряда, ширина фиксирована — RATES_WIDTH) ──
 //
-// Курс BTC несёт визуальную доминанту кадра, как в эталоне. Кегля 48 в сетке
-// Terminus нет — 24×2 даёт то же число физических пикселей на штрих, поэтому
-// не рвёт их (см. font.h): растровому шрифту можно доверить только кратное
-// увеличение, не дробное.
+// Курс BTC несёт визуальную доминанту кадра, как в эталоне (.num, 41px) —
+// рисуется IBM Plex Mono Bold в точном пиксельном кегле, без кратного
+// увеличения Terminus (как было до появления второго шрифта): у векторного
+// контура, в отличие от растра Terminus, есть кегль ровно 41, не только
+// ближайший из фиксированной сетки.
 
 void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
     draw_eyebrow(c, r, "РЫНКИ");
@@ -376,9 +375,8 @@ void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
                   static_cast<int16_t>(label_baseline + 18), period, Color::Black);
 
         int16_t number_baseline = static_cast<int16_t>(label_baseline + 41);
-        constexpr uint8_t kScale = 2;  // 24×2 = 48 — доминанта кадра
         String value = format_value(btc, d.now, 0, "");
-        draw_text(c, fonts::Terminus24, r.x, number_baseline, value.c_str(), Color::Black, kScale);
+        draw_text(c, fonts::PlexMono41, r.x, number_baseline, value.c_str(), Color::Black);
 
         int16_t spark_top = static_cast<int16_t>(number_baseline + 10);
         constexpr int16_t kSparkH = 47;
@@ -408,8 +406,8 @@ void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
                   Color::Black);
 
         String val = format_value(p.slot, d.now, 2, "");
-        int16_t vw = text_width(fonts::Terminus24, val.c_str());
-        draw_text(c, fonts::Terminus24, static_cast<int16_t>(r.x + r.w - dw - vw - 10), y,
+        int16_t vw = text_width(fonts::PlexMono25, val.c_str());
+        draw_text(c, fonts::PlexMono25, static_cast<int16_t>(r.x + r.w - dw - vw - 10), y,
                   val.c_str(), Color::Black);
         y = static_cast<int16_t>(y + 36);
     }
@@ -428,14 +426,15 @@ void draw_limit_row(Canvas& c, Rect area, const char* window_label, const Slot* 
     draw_text(c, fonts::Terminus14, area.x, static_cast<int16_t>(area.y + 10), window_label,
               Color::Black);
     String pct = format_percent(s, now);
-    int16_t pw = text_width(fonts::Terminus16, pct.c_str());
+    // 16px — .num парного окна (Claude 5ч/неделя) в cockpit.html.
+    int16_t pw = text_width(fonts::PlexMono16, pct.c_str());
     int16_t label_w = text_width(fonts::Terminus14, window_label);
     int16_t bar_x = static_cast<int16_t>(area.x + label_w + 8);
     int16_t bar_w = static_cast<int16_t>(area.w - label_w - 8 - pw - 8);
     if (bar_w > 0) {
         draw_segbar(c, Rect{bar_x, area.y, bar_w, 14}, has_data(s) ? s->number : 0, segments);
     }
-    draw_text(c, fonts::Terminus16, static_cast<int16_t>(area.x + area.w - pw),
+    draw_text(c, fonts::PlexMono16, static_cast<int16_t>(area.x + area.w - pw),
               static_cast<int16_t>(area.y + 12), pct.c_str(), Color::Black);
 }
 
@@ -488,9 +487,9 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     String val = format_value(s, now, 0, "");
     int16_t label_w = text_width(fonts::Terminus14, label);
     int16_t value_x = static_cast<int16_t>(area.x + label_w + 8);
-    draw_text(c, fonts::Terminus24, value_x, static_cast<int16_t>(baseline + 4), val.c_str(),
+    draw_text(c, fonts::PlexMono28, value_x, static_cast<int16_t>(baseline + 4), val.c_str(),
               Color::Black);
-    int16_t vw = text_width(fonts::Terminus24, val.c_str());
+    int16_t vw = text_width(fonts::PlexMono28, val.c_str());
     draw_text(c, fonts::Terminus14, static_cast<int16_t>(value_x + vw + 6),
               static_cast<int16_t>(baseline + 4), unit, Color::Black);
 
@@ -503,8 +502,14 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
 
     if (!has_data(s)) return;
 
-    int16_t spark_top = static_cast<int16_t>(baseline + 13);
-    constexpr int16_t kSparkH = 20;
+    // 11/14/18 (было 13/20/12) — обмер эталона после перехода значения на
+    // PlexMono28 (docs/architecture.md, "Шрифты"): у эталона от базовой линии
+    // значения до низа блока (график + тег) 53px (reference/cockpit-reference.png,
+    // зона «воздух»), у нас с прежними отступами набегало 65 — блок упирался в
+    // нижнюю границу ряда. Высота искры (18, не 20) — тоже обмер, ближе к
+    // .num-графику эталона (svg height=18 в cockpit.html), не круглое число.
+    int16_t spark_top = static_cast<int16_t>(baseline + 11);
+    constexpr int16_t kSparkH = 18;
     float spark[Slot::kHistoryCapacity + 1];
     uint8_t n = build_spark(*s, spark, static_cast<uint8_t>(Slot::kHistoryCapacity + 1));
     draw_sparkline(c, Rect{area.x, spark_top, area.w, kSparkH}, spark, n);
@@ -513,7 +518,7 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     bool quiet = !alarm && is_quiet(s->number);
     const char* state = alarm ? "ПРОВЕТРИТЬ" : (quiet ? "СВЕЖО" : "НОРМА");
     draw_state_tag(c, static_cast<int16_t>(area.x + area.w),
-                   static_cast<int16_t>(spark_top + kSparkH + 12), state, alarm, quiet);
+                   static_cast<int16_t>(spark_top + kSparkH + 6), state, alarm, quiet);
 }
 
 void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
@@ -569,13 +574,16 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
             String pct = format_percent(codex, d.now);
-            int16_t pw = text_width(fonts::Terminus16, pct.c_str());
+            // 20px — .num одиночного окна (GPT) в cockpit.html, крупнее
+            // парного (16px у Claude выше): в эталоне у одной строки больше
+            // свободного места по высоте, чем у половины разделённого блока.
+            int16_t pw = text_width(fonts::PlexMono20, pct.c_str());
             int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
             if (bar_w > 0) {
                 draw_segbar(c, Rect{r.x, bar_y, bar_w, 14}, codex->number,
                             segments_for_width(bar_w));
             }
-            draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - pw),
+            draw_text(c, fonts::PlexMono20, static_cast<int16_t>(r.x + r.w - pw),
                       static_cast<int16_t>(bar_y + 12), pct.c_str(), Color::Black);
             cursor = static_cast<int16_t>(bar_y + 14);
         }
@@ -591,7 +599,12 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
 
     if (has_air) {
         draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "КАБИНЕТ · ВОЗДУХ");
-        int16_t area_y = static_cast<int16_t>(y + 20);
+        // 26, не 20: у PlexMono28 (значение CO₂/TVOC) выносные части поднимают
+        // верхний край чернил заметно выше базовой линии, чем у прежнего
+        // Terminus24 — с прежним отступом строка значения почти касалась
+        // эйброу сверху (эталон даёт видимый зазор ~10px между ними, обмер
+        // reference/cockpit-reference.png).
+        int16_t area_y = static_cast<int16_t>(y + 26);
         int16_t area_h = static_cast<int16_t>(r.y + r.h - area_y);
 
         if (has_co2 && has_tvoc) {
@@ -681,8 +694,8 @@ void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
     if (has_data(temp)) {
         char buf[8];
         std::snprintf(buf, sizeof(buf), "%+d°", static_cast<int>(temp->number));
-        draw_text(c, fonts::Terminus24, r.x, y, buf, Color::Black);
-        int16_t tw = text_width(fonts::Terminus24, buf);
+        draw_text(c, fonts::PlexMono28, r.x, y, buf, Color::Black);
+        int16_t tw = text_width(fonts::PlexMono28, buf);
         const Slot* summary = store.find("weather.summary");
         if (has_data(summary)) {
             int16_t summary_w = static_cast<int16_t>(r.w - tw - 10);
@@ -703,7 +716,8 @@ void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
         if (y > r.y + r.h) break;
 
         if (has_data(at)) {
-            draw_text(c, fonts::Terminus14, r.x, y, at->text.c_str(), Color::Black);
+            // 14px — .num времени события в cockpit.html (`ev.at_label`).
+            draw_text(c, fonts::PlexMono14, r.x, y, at->text.c_str(), Color::Black);
         }
         String label = truncate_to_width(fonts::Terminus14, title->text.c_str(),
                                          static_cast<int16_t>(r.w - 56));
@@ -714,6 +728,37 @@ void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
 }
 
 }  // namespace
+
+String format_decimal(float value, int decimals) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.*f", decimals, static_cast<double>(value));
+    for (char* p = buf; *p; ++p) {
+        if (*p == '.') *p = ',';
+    }
+
+    // Разряды целой части разделяем пробелом: «80 689» вместо «80689». На
+    // пятизначном курсе без разделителя читатель считает нули глазами, а
+    // эталон эту группировку делает. Работаем с буфером, а не со String:
+    // хостовый шим не умеет индексацию, а вести две ветки ради форматирования
+    // числа — лишнее.
+    int int_end = 0;
+    while (buf[int_end] != '\0' && buf[int_end] != ',') ++int_end;
+    const int digits_start = (buf[0] == '-' || buf[0] == '+') ? 1 : 0;
+    if (int_end - digits_start <= 4) return String(buf);  // до четырёх цифр группировка мешает
+
+    char out[40];
+    int w = 0;
+    for (int i = 0; i < int_end && w < static_cast<int>(sizeof(out)) - 2; ++i) {
+        if (i > digits_start && (int_end - i) % 3 == 0) out[w++] = ' ';
+        out[w++] = buf[i];
+    }
+    for (int i = int_end; buf[i] != '\0' && w < static_cast<int>(sizeof(out)) - 1; ++i) {
+        out[w++] = buf[i];
+    }
+    out[w] = '\0';
+    return String(out);
+}
+
 
 int8_t wifi_bars(int32_t rssi_dbm) {
     if (rssi_dbm == 0) return 0;  // сентинел DeviceInfo::wifi_rssi — «не в сети»

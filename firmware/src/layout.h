@@ -64,6 +64,10 @@ int8_t wifi_bars(int32_t rssi_dbm);
 // в layout.cpp) виден на глаз. Диапазон 4..20.
 uint8_t segments_for_width(int16_t w);
 
+// Число для экрана: десятичный разделитель запятой, разряды целой части
+// разбиты пробелом начиная с пяти цифр — как в эталоне («80 689», но «5496»).
+String format_decimal(float value, int decimals);
+
 struct Civil {
     int weekday = 0;  // 0=Пн .. 6=Вс
     int day = 1;

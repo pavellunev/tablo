@@ -403,6 +403,33 @@ static void test_text_width_is_sum_of_advances_for_monospace() {
     TEST_ASSERT_EQUAL(one * 3, three);
 }
 
+
+// ── группировка разрядов ───────────────────────────────────────────────
+
+void test_thousands_get_a_space(void) {
+    // «80 689», как в эталоне: на пятизначном курсе без разделителя нули
+    // приходится считать глазами.
+    TEST_ASSERT_EQUAL_STRING("80 689", layout::format_decimal(80689.0f, 0).c_str());
+}
+
+void test_four_digits_stay_together(void) {
+    // TVOC 5496 в эталоне идёт без пробела — группировка на четырёх цифрах
+    // только дробит число.
+    TEST_ASSERT_EQUAL_STRING("5496", layout::format_decimal(5496.0f, 0).c_str());
+}
+
+void test_decimals_survive_grouping(void) {
+    TEST_ASSERT_EQUAL_STRING("104,80", layout::format_decimal(104.8f, 2).c_str());
+}
+
+void test_millions_get_two_spaces(void) {
+    TEST_ASSERT_EQUAL_STRING("1 234 567", layout::format_decimal(1234567.0f, 0).c_str());
+}
+
+void test_negative_keeps_sign_next_to_digits(void) {
+    TEST_ASSERT_EQUAL_STRING("-80 689", layout::format_decimal(-80689.0f, 0).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -458,6 +485,12 @@ int main() {
     RUN_TEST(test_decode_utf8_two_byte_cyrillic);
     RUN_TEST(test_find_glyph_known_and_unknown_codepoint);
     RUN_TEST(test_text_width_is_sum_of_advances_for_monospace);
+
+    RUN_TEST(test_thousands_get_a_space);
+    RUN_TEST(test_four_digits_stay_together);
+    RUN_TEST(test_decimals_survive_grouping);
+    RUN_TEST(test_millions_get_two_spaces);
+    RUN_TEST(test_negative_keeps_sign_next_to_digits);
 
     return UNITY_END();
 }
