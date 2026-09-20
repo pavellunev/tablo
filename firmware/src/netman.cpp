@@ -319,4 +319,12 @@ IPAddress ip() {
 String ap_ssid() { return current_ap_ssid; }
 String ap_password() { return current_ap_password; }
 
+int32_t rssi() {
+    // 0 — сентинел «нет сигнала» для layout::wifi_bars (см. layout.h): в
+    // режиме точки доступа или до первого подключения WiFi.RSSI() значения не
+    // даёт вовсе, а настоящий 0 дБм для реального сигнала физически не
+    // бывает — можно не заводить отдельный bool "есть ли значение".
+    return current_mode == Mode::kStation ? WiFi.RSSI() : 0;
+}
+
 }  // namespace netman

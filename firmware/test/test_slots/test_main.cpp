@@ -117,6 +117,84 @@ static void test_mark_failed_does_not_touch_other_connectors() {
     TEST_ASSERT_TRUE(store.find("co2")->ok);
 }
 
+// ── slots::Store — история значений для спарклайна (layout.cpp) ──
+
+static void test_history_empty_on_first_put() {
+    slots::Store store;
+    slots::Slot s;
+    s.ok = true;
+    s.at = 10;
+    s.ttl = 60;
+    s.number = 100;
+    store.put("btc", s);
+
+    TEST_ASSERT_EQUAL_UINT8(0, store.find("btc")->history_len);
+}
+
+static void test_history_accumulates_previous_values_oldest_first() {
+    slots::Store store;
+    slots::Slot s;
+    s.ok = true;
+    s.ttl = 60;
+
+    s.at = 10;
+    s.number = 100;
+    store.put("btc", s);
+    s.at = 20;
+    s.number = 200;
+    store.put("btc", s);
+    s.at = 30;
+    s.number = 300;
+    store.put("btc", s);
+
+    const slots::Slot* found = store.find("btc");
+    TEST_ASSERT_EQUAL_UINT8(2, found->history_len);
+    TEST_ASSERT_EQUAL_FLOAT(100, found->history[0]);
+    TEST_ASSERT_EQUAL_FLOAT(200, found->history[1]);
+    TEST_ASSERT_EQUAL_FLOAT(300, found->number);  // текущее значение — не в history
+}
+
+static void test_history_caps_at_capacity_dropping_oldest() {
+    slots::Store store;
+    slots::Slot s;
+    s.ok = true;
+    s.ttl = 60;
+
+    // capacity+2 последовательных put() — самые старые две точки должны выпасть.
+    for (uint8_t i = 0; i < slots::Slot::kHistoryCapacity + 2; ++i) {
+        s.at = i + 1;
+        s.number = i;  // 0, 1, 2, ...
+        store.put("btc", s);
+    }
+
+    const slots::Slot* found = store.find("btc");
+    TEST_ASSERT_EQUAL_UINT8(slots::Slot::kHistoryCapacity, found->history_len);
+    // Последнее put() записало number = capacity+1; history — предыдущие
+    // kHistoryCapacity значений, самое старое из которых — 1 (0 выпало).
+    TEST_ASSERT_EQUAL_FLOAT(1, found->history[0]);
+    TEST_ASSERT_EQUAL_FLOAT(static_cast<float>(slots::Slot::kHistoryCapacity),
+                            found->history[slots::Slot::kHistoryCapacity - 1]);
+}
+
+static void test_history_does_not_grow_across_mark_failed_gap() {
+    slots::Store store;
+    slots::Slot s;
+    s.ok = true;
+    s.at = 10;
+    s.ttl = 60;
+    s.number = 100;
+    store.put("btc", s, "rates");
+
+    store.mark_failed("rates");  // ok=false — источник отвалился
+
+    s.at = 20;
+    s.number = 200;
+    store.put("btc", s, "rates");  // put() после отказа не должен утащить в
+    // history значение неизвестного состояния — предыдущая запись была ok=false.
+
+    TEST_ASSERT_EQUAL_UINT8(0, store.find("btc")->history_len);
+}
+
 static void test_mark_failed_ignores_slot_without_owner() {
     slots::Store store;
     slots::Slot s;
@@ -249,6 +327,11 @@ int main() {
     RUN_TEST(test_mark_failed_keeps_value_clears_ok);
     RUN_TEST(test_mark_failed_does_not_touch_other_connectors);
     RUN_TEST(test_mark_failed_ignores_slot_without_owner);
+
+    RUN_TEST(test_history_empty_on_first_put);
+    RUN_TEST(test_history_accumulates_previous_values_oldest_first);
+    RUN_TEST(test_history_caps_at_capacity_dropping_oldest);
+    RUN_TEST(test_history_does_not_grow_across_mark_failed_gap);
 
     RUN_TEST(test_http_path_nested_object);
     RUN_TEST(test_http_path_array_index);

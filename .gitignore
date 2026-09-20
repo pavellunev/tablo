@@ -2,3 +2,10 @@
 .vscode/
 *.bak
 .DS_Store
+__pycache__/
+
+# tools/render_frame: собранный бинарник и снятые кадры — генерируются
+# build_and_run.sh заново, коммитить нечего (см. firmware/assets/README.md
+# про сам шрифт — там источники осознанно оставлены, здесь другой случай).
+tools/render_frame/render_frame
+tools/render_frame/out/

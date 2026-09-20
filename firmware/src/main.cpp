@@ -7,10 +7,12 @@
 
 #include <Arduino.h>
 
+#include "battery.h"
 #include "board.h"
 #include "config.h"
 #include "connectors.h"
 #include "display.h"
+#include "layout.h"
 #include "netman.h"
 #include "portal.h"
 #include "slots.h"
@@ -70,8 +72,21 @@ void redraw() {
     // него с теми же учётными данными не перерисует экран.
     g_shown_ap_ssid = String();
     g_shown_ap_password = String();
-    display::show_status(netman::status_text(), netman::ip().toString(), g_slots,
-                         now_seconds());
+
+    layout::DeviceInfo device;
+    device.wifi_rssi = netman::rssi();
+    device.battery_pct = battery::percent();
+    // now_seconds() — время работы устройства (millis()/1000), не настоящее
+    // unix-время: синхронизации часов (NTP) в проекте пока нет — вне рамок
+    // фазы 3, см. Status Log в .claude/plans/inkroam.md. Свежесть слотов
+    // (Slot::fresh/stale) от этого не страдает — там сравниваются между собой
+    // значения одних и тех же часов, — а вот дата и часы в шапке кадра будут
+    // отсчитываться от 1 января 1970 года, а не от реальной даты, пока NTP не
+    // появится.
+    device.now = now_seconds();
+    device.next_update_at = device.now + REDRAW_INTERVAL_MS / 1000;
+    device.timezone_minutes = netman::settings().timezone_minutes;
+    display::show_frame(g_slots, device);
 }
 
 }  // namespace
@@ -83,6 +98,7 @@ void setup() {
 
     display::begin();
     display::show_boot_screen();
+    battery::begin();
 
     netman::begin(config::load());
     portal::begin();

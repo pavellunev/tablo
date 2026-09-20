@@ -7,6 +7,7 @@
 
 #include <Arduino.h>
 
+#include "layout.h"
 #include "slots.h"
 
 namespace display {
@@ -16,11 +17,11 @@ void begin();
 // Тестовый кадр фазы 0: проверяем шрифт, линии и заливку на живой панели.
 void show_boot_screen();
 
-// Служебный кадр до появления раскладки: состояние сети и полученные слоты.
-// По нему видно, отвечает ли коннектор и что именно он прислал, — без кабеля
-// и чтения логов.
-void show_status(const String& network, const String& ip, const slots::Store& store,
-                 uint32_t now);
+// Кадр раскладки (фаза 3): шапка + пересобранная сетка блоков, тем же
+// движком, что и tools/render_frame на хосте, — canvas_gxepd2.h оборачивает
+// ту же панель в layout::draw_frame() без дублирования логики отрисовки.
+// Заменяет служебный кадр фаз 0-2 (список слотов без вёрстки).
+void show_frame(const slots::Store& store, const layout::DeviceInfo& device);
 
 // Полное обновление — раз в сутки и после долгой череды частичных, чтобы
 // убрать остаточное изображение.

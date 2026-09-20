@@ -4,6 +4,7 @@
 #include <SPI.h>
 
 #include "board.h"
+#include "canvas_gxepd2.h"
 
 namespace {
 
@@ -98,59 +99,14 @@ void refresh_full() {
 }
 
 
-void show_status(const String& network, const String& ip, const slots::Store& store,
-                 uint32_t now) {
+void show_frame(const slots::Store& store, const layout::DeviceInfo& device) {
     // Частичное обновление: полное моргает всем экраном около секунды, а этот
     // кадр перерисовывается часто.
     epd.setPartialWindow(0, 0, board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
+    canvas::CanvasGxEPD2<Panel> canvas(epd);
     epd.firstPage();
     do {
-        epd.fillScreen(GxEPD_WHITE);
-        epd.setTextColor(GxEPD_BLACK);
-
-        epd.setTextSize(2);
-        epd.setCursor(20, 30);
-        epd.print("inkroam");
-
-        epd.setTextSize(1);
-        epd.setCursor(20, 60);
-        epd.print(network);
-        if (ip.length() > 0) {
-            epd.print("  ");
-            epd.print(ip);
-        }
-
-        epd.drawLine(20, 75, board::SCREEN_WIDTH - 20, 75, GxEPD_BLACK);
-
-        int16_t y = 100;
-        if (store.size() == 0) {
-            epd.setCursor(20, y);
-            epd.print("no data yet - configure a connector");
-        }
-        for (const auto& entry : store.all()) {
-            if (y > board::SCREEN_HEIGHT - 30) {
-                break;  // ниже панели рисовать некуда
-            }
-            const slots::Slot& slot = entry.second;
-
-            epd.setCursor(20, y);
-            epd.print(entry.first);
-
-            epd.setCursor(300, y);
-            // Прочерк вместо значения: пустой слот и нулевой — разные вещи,
-            // а ноль на месте «нет данных» читается как настоящая величина.
-            if (slot.empty()) {
-                epd.print("-");
-            } else {
-                epd.print(slot.text);
-                // Возраст рядом со значением: кадр, молча показывающий
-                // вчерашнее, выглядит исправным — это худший вид поломки.
-                if (slot.stale(now)) {
-                    epd.print("  (stale)");
-                }
-            }
-            y += 20;
-        }
+        layout::draw_frame(canvas, store, device);
     } while (epd.nextPage());
 }
 
