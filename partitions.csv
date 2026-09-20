@@ -1,0 +1,10 @@
+# 8 МБ flash: два слота приложения под OTA плюс раздел для веб-интерфейса.
+# Слот app 3 МБ — с запасом: GxEPD2 + AsyncWebServer + TLS занимают около 1.4 МБ.
+# nvs 20 КБ вместо дефолтных 16 — там живут сохранённые сети и ключи коннекторов.
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x5000
+otadata,    data, ota,      0xe000,   0x2000
+app0,       app,  ota_0,    0x10000,  0x300000
+app1,       app,  ota_1,    0x310000, 0x300000
+littlefs,   data, spiffs,   0x610000, 0x1E0000
+coredump,   data, coredump, 0x7F0000, 0x10000

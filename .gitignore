@@ -1,0 +1,4 @@
+.pio/
+.vscode/
+*.bak
+.DS_Store

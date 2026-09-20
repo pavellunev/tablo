@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>inkroam — настройка</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f3ef;
+    --card: #ffffff;
+    --text: #1a1a17;
+    --muted: #6b6a64;
+    --border: #dcdad2;
+    --accent: #2c2c28;
+    --accent-text: #ffffff;
+    --danger: #9c3b2e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  header {
+    padding: 20px 16px 8px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  header p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  main {
+    padding: 8px 16px 96px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  section h2 {
+    margin: 0 0 12px;
+    font-size: 15px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .row .label {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row .meta {
+    color: var(--muted);
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  button {
+    font: inherit;
+    border-radius: 10px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    padding: 12px 16px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+  }
+  button.small {
+    padding: 6px 10px;
+    min-height: 32px;
+    font-size: 13px;
+  }
+  button.danger {
+    background: transparent;
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  button:active { opacity: 0.75; }
+  button.full { width: 100%; margin-top: 4px; }
+  input, select {
+    font: inherit;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+    margin-top: 6px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .actions button { flex: 1; }
+  .empty {
+    color: var(--muted);
+    font-size: 14px;
+    padding: 8px 0;
+  }
+  .connector-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .connector-card .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .checkbox-row input { width: auto; margin-top: 2px; }
+  .warning {
+    color: var(--danger);
+    font-size: 12px;
+  }
+  .readonly-banner {
+    background: #fff7ea;
+    border: 1px solid #e2c98a;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+  footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    gap: 8px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  footer button { flex: 1; }
+  #status {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 72px;
+    max-width: 448px;
+    margin: 0 auto;
+    text-align: center;
+    font-size: 13px;
+    color: var(--muted);
+    min-height: 16px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>inkroam</h1>
+  <p>настройка устройства</p>
+</header>
+
+<main>
+  <div id="readonly-banner" class="readonly-banner" hidden>
+    Настройки можно изменить только подключившись к точке доступа самого
+    устройства — её имя и пароль показаны на экране. Из этой сети форма
+    доступна только для чтения.
+  </div>
+
+  <section id="wifi-section">
+    <h2>Сеть</h2>
+    <div id="saved-networks"><p class="empty">сохранённых сетей нет</p></div>
+    <button type="button" class="secondary full" id="scan-btn">Сканировать сети</button>
+    <div id="scan-list"></div>
+    <div id="add-network-form" hidden>
+      <label id="add-ssid-label"></label>
+      <input id="add-password" type="password" placeholder="Пароль сети">
+      <div class="actions">
+        <button type="button" id="add-network-confirm">Добавить</button>
+        <button type="button" class="secondary" id="add-network-cancel">Отмена</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="connectors-section">
+    <h2>Коннекторы</h2>
+    <div id="connector-list"><p class="empty">коннекторов нет</p></div>
+    <button type="button" class="secondary full" id="add-connector-btn">Добавить коннектор</button>
+  </section>
+
+  <section id="device-section">
+    <h2>Устройство</h2>
+    <label>Имя устройства (точки доступа)
+      <input id="device-name" type="text" placeholder="inkroam-setup">
+    </label>
+  </section>
+
+</main>
+
+<p id="status"></p>
+<footer>
+  <button type="button" id="save-btn">Сохранить</button>
+  <button type="button" class="secondary" id="reboot-btn">Перезагрузить</button>
+</footer>
+
+<script>
+'use strict';
+
+var state = { device_name: '', timezone_minutes: 0, networks: [], connectors: [], canWrite: true };
+var pendingSsid = null;
+var pendingSecure = false;
+
+function el(id) { return document.getElementById(id); }
+
+function setStatus(text) {
+  el('status').textContent = text;
+}
+
+function signalBars(rssi) {
+  if (rssi >= -60) return '▂▄▆█';
+  if (rssi >= -70) return '▂▄▆';
+  if (rssi >= -80) return '▂▄';
+  return '▂';
+}
+
+function fetchJSON(url, options) {
+  return fetch(url, options).then(function (r) {
+    if (!r.ok) throw new Error('http ' + r.status);
+    return r.json();
+  });
+}
+
+function loadConfig() {
+  return fetchJSON('/api/config').then(function (cfg) {
+    state.device_name = cfg.device_name || '';
+    state.timezone_minutes = cfg.timezone_minutes || 0;
+    // can_write — решает устройство по интерфейсу, с которого пришёл этот
+    // самый запрос (docs/decisions.md, п.8): страница не гадает по другим
+    // признакам, а просто верит ответу.
+    state.canWrite = !!cfg.can_write;
+    el('readonly-banner').hidden = state.canWrite;
+    el('save-btn').disabled = !state.canWrite;
+    el('reboot-btn').disabled = !state.canWrite;
+    state.networks = (cfg.networks || []).map(function (n) {
+      return { ssid: n.ssid, password: '', password_set: !!n.password_set };
+    });
+    state.connectors = (cfg.connectors || []).map(function (c) {
+      return {
+        id: c.id, kind: c.kind || 'http', url: c.url || '',
+        interval: c.interval || 300, token: '', token_set: !!c.token_set,
+        insecure: !!c.insecure
+      };
+    });
+    el('device-name').value = state.device_name;
+    renderNetworks();
+    renderConnectors();
+  }).catch(function (e) {
+    setStatus('не удалось загрузить настройки: ' + e.message);
+  });
+}
+
+function renderNetworks() {
+  var box = el('saved-networks');
+  if (state.networks.length === 0) {
+    box.innerHTML = '<p class="empty">сохранённых сетей нет</p>';
+    return;
+  }
+  box.innerHTML = '';
+  state.networks.forEach(function (n, i) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    var lockNote = n.password ? 'новый пароль' : (n.password_set ? 'пароль сохранён' : 'открытая сеть');
+    row.innerHTML =
+      '<span class="label">' + escapeHtml(n.ssid) + '</span>' +
+      '<span class="meta">' + lockNote + '</span>' +
+      '<button type="button" class="small danger" data-remove-network="' + i + '">✕</button>';
+    box.appendChild(row);
+  });
+}
+
+function renderScanList(results) {
+  var box = el('scan-list');
+  if (!results || results.length === 0) {
+    box.innerHTML = '<p class="empty">сети не найдены</p>';
+    return;
+  }
+  box.innerHTML = '';
+  results.forEach(function (r) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML =
+      '<span class="label">' + (r.secure ? '🔒 ' : '') + escapeHtml(r.ssid) + '</span>' +
+      '<span class="meta">' + signalBars(r.rssi) + '</span>' +
+      '<button type="button" class="small" data-pick-ssid="' + escapeHtml(r.ssid) + '" data-secure="' + (r.secure ? '1' : '0') + '">выбрать</button>';
+    box.appendChild(row);
+  });
+}
+
+function showAddForm(ssid, secure) {
+  pendingSsid = ssid;
+  pendingSecure = secure;
+  el('add-ssid-label').textContent = 'Пароль для «' + ssid + '»';
+  el('add-password').value = '';
+  el('add-password').hidden = !secure;
+  el('add-network-form').hidden = false;
+}
+
+function confirmAddNetwork() {
+  if (!pendingSsid) return;
+  var password = pendingSecure ? el('add-password').value : '';
+  var existing = state.networks.find(function (n) { return n.ssid === pendingSsid; });
+  if (existing) {
+    existing.password = password;
+    existing.password_set = existing.password_set || password.length > 0;
+  } else {
+    state.networks.push({ ssid: pendingSsid, password: password, password_set: password.length > 0 });
+  }
+  el('add-network-form').hidden = true;
+  pendingSsid = null;
+  renderNetworks();
+}
+
+function renderConnectors() {
+  var box = el('connector-list');
+  if (state.connectors.length === 0) {
+    box.innerHTML = '<p class="empty">коннекторов нет</p>';
+    return;
+  }
+  box.innerHTML = '';
+  state.connectors.forEach(function (c, i) {
+    var card = document.createElement('div');
+    card.className = 'connector-card';
+    card.innerHTML =
+      '<div class="grid">' +
+      '<label>id<input type="text" value="' + escapeAttr(c.id) + '" data-field="id" data-index="' + i + '"></label>' +
+      '<label>тип<select data-field="kind" data-index="' + i + '">' +
+      '<option value="homeassistant"' + (c.kind === 'homeassistant' ? ' selected' : '') + '>homeassistant</option>' +
+      '<option value="http"' + (c.kind === 'http' ? ' selected' : '') + '>http</option>' +
+      '</select></label>' +
+      '</div>' +
+      '<label>адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-field="url" data-index="' + i + '"></label>' +
+      '<div class="grid">' +
+      '<label>токен<input type="password" placeholder="' + (c.token_set ? 'задан, оставить пустым' : 'нет') + '" data-field="token" data-index="' + i + '"></label>' +
+      '<label>период, с<input type="number" min="5" value="' + c.interval + '" data-field="interval" data-index="' + i + '"></label>' +
+      '</div>' +
+      '<label class="checkbox-row"><input type="checkbox" data-field="insecure" data-index="' + i + '"' + (c.insecure ? ' checked' : '') + '>' +
+      '<span>Не проверять сертификат (https)<br><span class="warning">Только для самоподписанного сертификата домашнего сервера. Без проверки токен коннектора могут перехватить в чужой сети — см. docs/decisions.md, п.9.</span></span></label>' +
+      '<button type="button" class="small danger" data-remove-connector="' + i + '">Удалить коннектор</button>';
+    box.appendChild(card);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+document.addEventListener('click', function (e) {
+  var t = e.target;
+
+  if (t.id === 'scan-btn') {
+    setStatus('сканируем…');
+    fetchJSON('/api/scan').then(function (list) {
+      renderScanList(list);
+      setStatus('');
+    }).catch(function (err) { setStatus('сканирование не удалось: ' + err.message); });
+  }
+
+  if (t.dataset && t.dataset.pickSsid !== undefined) {
+    showAddForm(t.dataset.pickSsid, t.dataset.secure === '1');
+  }
+
+  if (t.id === 'add-network-confirm') confirmAddNetwork();
+  if (t.id === 'add-network-cancel') { el('add-network-form').hidden = true; pendingSsid = null; }
+
+  if (t.dataset && t.dataset.removeNetwork !== undefined) {
+    state.networks.splice(Number(t.dataset.removeNetwork), 1);
+    renderNetworks();
+  }
+
+  if (t.id === 'add-connector-btn') {
+    state.connectors.push({ id: '', kind: 'http', url: '', interval: 300, token: '', token_set: false, insecure: false });
+    renderConnectors();
+  }
+
+  if (t.dataset && t.dataset.removeConnector !== undefined) {
+    state.connectors.splice(Number(t.dataset.removeConnector), 1);
+    renderConnectors();
+  }
+
+  if (t.id === 'save-btn') save();
+  if (t.id === 'reboot-btn') reboot();
+});
+
+function handleConnectorFieldChange(e) {
+  var t = e.target;
+  if (!t.dataset || t.dataset.index === undefined) return;
+  var c = state.connectors[Number(t.dataset.index)];
+  if (!c) return;
+  if (t.dataset.field === 'interval') c.interval = Number(t.value) || 300;
+  else if (t.dataset.field === 'insecure') c.insecure = t.checked;
+  else c[t.dataset.field] = t.value;
+}
+// 'change' — для чекбокса insecure (не все браузеры шлют 'input' по клику на
+// checkbox одинаково надёжно), 'input' — для текстовых полей, как и раньше.
+document.addEventListener('input', handleConnectorFieldChange);
+document.addEventListener('change', handleConnectorFieldChange);
+
+// Запись настроек (docs/decisions.md, п.8): устройство разрешает её только
+// с интерфейса своей точки доступа и проверяет это само по каждому запросу —
+// странице не нужно ничего предъявлять сверх обычного запроса, но и обходить
+// отказ ей нечем: canWrite здесь только для того, чтобы не звать сервер
+// заведомо впустую и объяснить пользователю причину раньше, чем это сделает
+// сервер кодом 403.
+function save() {
+  if (!state.canWrite) {
+    setStatus('запись запрещена: подключитесь к точке доступа устройства');
+    return;
+  }
+  doSave();
+}
+
+function doSave() {
+  var payload = {
+    device_name: el('device-name').value || 'inkroam-setup',
+    timezone_minutes: state.timezone_minutes,
+    networks: state.networks.map(function (n) { return { ssid: n.ssid, password: n.password || '' }; }),
+    connectors: state.connectors.filter(function (c) { return c.id; }).map(function (c) {
+      return {
+        id: c.id, kind: c.kind, url: c.url, interval: c.interval,
+        token: c.token || '', insecure: !!c.insecure
+      };
+    })
+  };
+
+  setStatus('сохраняем…');
+  fetchJSON('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function () {
+    setStatus('сохранено');
+    return loadConfig();
+  }).catch(function (err) { setStatus('не сохранилось: ' + err.message); });
+}
+
+function reboot() {
+  if (!state.canWrite) {
+    setStatus('перезагрузка запрещена: подключитесь к точке доступа устройства');
+    return;
+  }
+  if (!confirm('Перезагрузить устройство?')) return;
+  setStatus('перезагружаем…');
+  fetch('/api/reboot', { method: 'POST' }).catch(function () {});
+}
+
+loadConfig();
+</script>
+</body>
+</html>
