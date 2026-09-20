@@ -96,7 +96,7 @@ static void blit_glyph(canvas::Canvas& canvas, const GFXfont& font, const GFXgly
 }
 
 int16_t draw_text(canvas::Canvas& canvas, const GFXfont& font, int16_t x, int16_t y,
-                   const char* utf8, canvas::Color color, uint8_t scale) {
+                   const char* utf8, canvas::Color color, uint8_t scale, bool bold) {
     int16_t cursor = x;
     const char* p = utf8;
     while (*p) {
@@ -104,6 +104,9 @@ int16_t draw_text(canvas::Canvas& canvas, const GFXfont& font, int16_t x, int16_
         const GFXglyph* g = find_glyph(font, cp);
         if (g == nullptr) continue;  // нет глифа — пропускаем символ целиком, без плейсхолдера
         blit_glyph(canvas, font, *g, cursor, y, color, scale);
+        if (bold) {
+            blit_glyph(canvas, font, *g, static_cast<int16_t>(cursor + 1), y, color, scale);
+        }
         cursor = static_cast<int16_t>(cursor + g->xAdvance * scale);
     }
     return static_cast<int16_t>(cursor - x);

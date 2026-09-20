@@ -231,9 +231,10 @@ void draw_segbar(Canvas& c, Rect r, float pct, uint8_t segments) {
     int16_t seg_w = static_cast<int16_t>(r.w / segments);
     for (uint8_t i = 0; i < segments; ++i) {
         int16_t x = static_cast<int16_t>(r.x + i * seg_w);
-        int16_t w = (i == static_cast<uint8_t>(segments - 1))
-                        ? static_cast<int16_t>(r.x + r.w - x)
-                        : static_cast<int16_t>(seg_w - kGap);
+        // Все деления одной ширины. Раньше последнее добирало остаток от
+        // деления — на глаз шкала выглядела кривой, а по её длине нельзя
+        // посчитать заполнение: одно деление стоило больше остальных.
+        int16_t w = static_cast<int16_t>(seg_w - kGap);
         if (w <= 0) continue;
         if (i < full) {
             c.fill_rect(x, r.y, w, r.h, Color::Black);
@@ -248,7 +249,7 @@ void draw_segbar(Canvas& c, Rect r, float pct, uint8_t segments) {
 
 void draw_eyebrow(Canvas& c, Rect r, const char* label) {
     draw_text(c, fonts::Terminus16, r.x, static_cast<int16_t>(r.y + EYEBROW_TEXT_OFFSET), label,
-              Color::Black);
+              Color::Black, 1, /*bold=*/true);
     int16_t lw = text_width(fonts::Terminus16, label);
     int16_t line_x = static_cast<int16_t>(r.x + lw + 8);
     if (line_x < r.x + r.w) {
@@ -270,7 +271,7 @@ int16_t draw_inverse_label(Canvas& c, int16_t x, int16_t baseline_y, const char*
     c.fill_rect(x, static_cast<int16_t>(baseline_y - kAbove), plate_w,
                 static_cast<int16_t>(kAbove + kBelow), Color::Black);
     draw_text(c, fonts::Terminus16, static_cast<int16_t>(x + kPadX), baseline_y, label,
-              Color::White);
+              Color::White, 1, /*bold=*/true);
     return plate_w;
 }
 
@@ -307,7 +308,7 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
     char date_buf[48];
     std::snprintf(date_buf, sizeof(date_buf), "%s · %d %s", WEEKDAYS[now_civil.weekday],
                   now_civil.day, MONTHS[now_civil.month - 1]);
-    draw_text(c, fonts::Terminus24, MARGIN, 32, date_buf, Color::Black);
+    draw_text(c, fonts::Terminus24, MARGIN, 32, date_buf, Color::Black, 1, /*bold=*/true);
 
     char clock_buf[24];
     if (d.next_update_at > 0) {
@@ -321,7 +322,7 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
     int16_t x = static_cast<int16_t>(c.width() - MARGIN);
     int16_t clock_w = text_width(fonts::Terminus14, clock_buf);
     x = static_cast<int16_t>(x - clock_w);
-    draw_text(c, fonts::Terminus14, x, 38, clock_buf, Color::Black);
+    draw_text(c, fonts::Terminus14, x, 38, clock_buf, Color::Black, 1, /*bold=*/true);
     x = static_cast<int16_t>(x - 16);
 
     if (d.battery_pct >= 0) {
@@ -329,14 +330,14 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
         std::snprintf(batt_buf, sizeof(batt_buf), "%d%%", d.battery_pct);
         int16_t w = text_width(fonts::Terminus14, batt_buf);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus14, x, 38, batt_buf, Color::Black);
+        draw_text(c, fonts::Terminus14, x, 38, batt_buf, Color::Black, 1, /*bold=*/true);
         x = static_cast<int16_t>(x - 4 - 22);
         draw_battery_icon(c, x, 24, d.battery_pct);
     } else {
         const char* usb = "USB";
         int16_t w = text_width(fonts::Terminus14, usb);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus14, x, 38, usb, Color::Black);
+        draw_text(c, fonts::Terminus14, x, 38, usb, Color::Black, 1, /*bold=*/true);
     }
     x = static_cast<int16_t>(x - 16 - 22);
     draw_wifi_bars(c, x, 20, wifi_bars(d.wifi_rssi));
@@ -363,16 +364,16 @@ void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
 
     if (has_data(btc)) {
         int16_t label_baseline = static_cast<int16_t>(y + 22);
-        draw_text(c, fonts::Terminus14, r.x, label_baseline, "BTC / USD", Color::Black);
+        draw_text(c, fonts::Terminus14, r.x, label_baseline, "BTC / USD", Color::Black, 1, /*bold=*/true);
 
         String delta = format_delta(btc->delta);
         int16_t dw = text_width(fonts::Terminus14, delta.c_str());
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
-                  delta.c_str(), Color::Black);
+                  delta.c_str(), Color::Black, 1, /*bold=*/true);
         const char* period = "ЗА 24 Ч";
         int16_t pw = text_width(fonts::Terminus14, period);
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - pw),
-                  static_cast<int16_t>(label_baseline + 18), period, Color::Black);
+                  static_cast<int16_t>(label_baseline + 18), period, Color::Black, 1, /*bold=*/true);
 
         int16_t number_baseline = static_cast<int16_t>(label_baseline + 41);
         String value = format_value(btc, d.now, 0, "");
@@ -398,12 +399,12 @@ void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
     for (const Pair& p : pairs) {
         if (!has_data(p.slot)) continue;
 
-        draw_text(c, fonts::Terminus14, r.x, y, p.label, Color::Black);
+        draw_text(c, fonts::Terminus14, r.x, y, p.label, Color::Black, 1, /*bold=*/true);
 
         String delta = format_delta(p.slot->delta);
         int16_t dw = text_width(fonts::Terminus14, delta.c_str());
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
-                  Color::Black);
+                  Color::Black, 1, /*bold=*/true);
 
         String val = format_value(p.slot, d.now, 2, "");
         int16_t vw = text_width(fonts::PlexMono25, val.c_str());
@@ -424,7 +425,7 @@ void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
 void draw_limit_row(Canvas& c, Rect area, const char* window_label, const Slot* s, uint32_t now,
                     uint8_t segments) {
     draw_text(c, fonts::Terminus14, area.x, static_cast<int16_t>(area.y + 10), window_label,
-              Color::Black);
+              Color::Black, 1, /*bold=*/true);
     String pct = format_percent(s, now);
     // 16px — .num парного окна (Claude 5ч/неделя) в cockpit.html.
     int16_t pw = text_width(fonts::PlexMono16, pct.c_str());
@@ -466,24 +467,24 @@ void draw_state_tag(Canvas& c, int16_t right_x, int16_t baseline_y, const char* 
         int16_t x = static_cast<int16_t>(right_x - plate_w);
         c.fill_rect(x, static_cast<int16_t>(baseline_y - 12), plate_w, 16, Color::Black);
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(x + kPadX), baseline_y, label,
-                  Color::White);
+                  Color::White, 1, /*bold=*/true);
     } else if (quiet) {
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(right_x - tw), baseline_y, label,
-                  Color::Black);
+                  Color::Black, 1, /*bold=*/true);
     } else {
         constexpr int16_t kPadX = 6;
         int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
         int16_t x = static_cast<int16_t>(right_x - plate_w);
         c.rect(x, static_cast<int16_t>(baseline_y - 12), plate_w, 16, Color::Black);
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(x + kPadX), baseline_y, label,
-                  Color::Black);
+                  Color::Black, 1, /*bold=*/true);
     }
 }
 
 void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, const Slot* s,
                      uint32_t now, bool (*is_alarm)(float), bool (*is_quiet)(float)) {
     int16_t baseline = static_cast<int16_t>(area.y + 14);
-    draw_text(c, fonts::Terminus14, area.x, baseline, label, Color::Black);
+    draw_text(c, fonts::Terminus14, area.x, baseline, label, Color::Black, 1, /*bold=*/true);
     String val = format_value(s, now, 0, "");
     int16_t label_w = text_width(fonts::Terminus14, label);
     int16_t value_x = static_cast<int16_t>(area.x + label_w + 8);
@@ -491,13 +492,13 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
               Color::Black);
     int16_t vw = text_width(fonts::PlexMono28, val.c_str());
     draw_text(c, fonts::Terminus14, static_cast<int16_t>(value_x + vw + 6),
-              static_cast<int16_t>(baseline + 4), unit, Color::Black);
+              static_cast<int16_t>(baseline + 4), unit, Color::Black, 1, /*bold=*/true);
 
     if (has_data(s) && s->delta != 0.0f) {
         String delta = format_delta_per_hour(s->delta);
         int16_t dw = text_width(fonts::Terminus14, delta.c_str());
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(area.x + area.w - dw), baseline,
-                  delta.c_str(), Color::Black);
+                  delta.c_str(), Color::Black, 1, /*bold=*/true);
     }
 
     if (!has_data(s)) return;
@@ -546,12 +547,12 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
 
         if (has_claude) {
             int16_t title_baseline = static_cast<int16_t>(cursor + 26);
-            draw_text(c, fonts::Terminus16, r.x, title_baseline, "Claude", Color::Black);
+            draw_text(c, fonts::Terminus16, r.x, title_baseline, "Claude", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.claude.reset");
             if (has_data(reset)) {
                 int16_t rw = text_width(fonts::Terminus14, reset->text.c_str());
                 draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - rw),
-                          title_baseline, reset->text.c_str(), Color::Black);
+                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 13);
             int16_t half = static_cast<int16_t>((r.w - 20) / 2);
@@ -565,12 +566,12 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
         if (has_codex) {
             int16_t title_baseline =
                 static_cast<int16_t>(cursor + (has_claude ? 27 : 26));
-            draw_text(c, fonts::Terminus16, r.x, title_baseline, "GPT", Color::Black);
+            draw_text(c, fonts::Terminus16, r.x, title_baseline, "GPT", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.codex.reset");
             if (has_data(reset)) {
                 int16_t rw = text_width(fonts::Terminus14, reset->text.c_str());
                 draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - rw),
-                          title_baseline, reset->text.c_str(), Color::Black);
+                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
             String pct = format_percent(codex, d.now);
@@ -635,7 +636,7 @@ void draw_mail(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
     int count = has_data(unread) ? static_cast<int>(unread->number) : 0;
     std::snprintf(summary, sizeof(summary), "%d НЕПРОЧИТАННЫХ", count);
     draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + plate_w + 10), header_baseline,
-              summary, Color::Black);
+              summary, Color::Black, 1, /*bold=*/true);
 
     constexpr int16_t kFirstRowBaseline = 45;  // от r.y — компактно, как в эталоне
     constexpr int16_t kRowHeight = 34;
@@ -664,20 +665,20 @@ void draw_mail(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
         if (has_data(from)) {
             String label = truncate_to_width(fonts::Terminus14, from->text.c_str(),
                                              static_cast<int16_t>(kSubjectX - kDotSize - 16));
-            draw_text(c, fonts::Terminus14, text_x, y, label.c_str(), Color::Black);
+            draw_text(c, fonts::Terminus14, text_x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
         }
         if (has_data(subject)) {
             int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - kTimeReserve);
             String label =
                 truncate_to_width(fonts::Terminus14, subject->text.c_str(), subject_w);
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + kSubjectX), y,
-                      label.c_str(), Color::Black);
+                      label.c_str(), Color::Black, 1, /*bold=*/true);
         }
         const Slot* at = store.find(String(time_id));
         if (has_data(at)) {
             int16_t tw = text_width(fonts::Terminus14, at->text.c_str());
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - tw), y,
-                      at->text.c_str(), Color::Black);
+                      at->text.c_str(), Color::Black, 1, /*bold=*/true);
         }
         c.hline(r.x, static_cast<int16_t>(y + kSeparatorGap), r.w, Color::Black);
         y = static_cast<int16_t>(y + kRowHeight);
@@ -701,7 +702,7 @@ void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
             int16_t summary_w = static_cast<int16_t>(r.w - tw - 10);
             String label = truncate_to_width(fonts::Terminus14, summary->text.c_str(), summary_w);
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + tw + 10), y, label.c_str(),
-                      Color::Black);
+                      Color::Black, 1, /*bold=*/true);
         }
         y = static_cast<int16_t>(y + 26);
     }
@@ -722,7 +723,7 @@ void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
         String label = truncate_to_width(fonts::Terminus14, title->text.c_str(),
                                          static_cast<int16_t>(r.w - 56));
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + 56), y, label.c_str(),
-                  Color::Black);
+                  Color::Black, 1, /*bold=*/true);
         y = static_cast<int16_t>(y + 20);
     }
 }
@@ -944,8 +945,9 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device) {
         // Разделитель садится на границу рядов, а не в середину зазора — в
         // эталоне зазор целиком идёт ПОСЛЕ линии (298→310 у div, а не по 6px
         // с обеих сторон).
-        canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h),
-                     static_cast<int16_t>(canvas.width() - 2 * MARGIN), Color::Black);
+        const int16_t rule_w = static_cast<int16_t>(canvas.width() - 2 * MARGIN);
+        canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h), rule_w, Color::Black);
+        canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h + 1), rule_w, Color::Black);
     }
 
     if (row1_has) {
@@ -966,6 +968,8 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device) {
         if (mail_ok) draw_mail(canvas, store, device, mail_col);
         if (today_ok) draw_today(canvas, store, device, today_col);
         if (mail_ok && today_ok) {
+            canvas.vline(static_cast<int16_t>(today_col.x - BOTTOM_GAP + 2), row2.y, row2.h,
+                         Color::Black);
             canvas.vline(static_cast<int16_t>(today_col.x - BOTTOM_GAP + 1), row2.y, row2.h,
                          Color::Black);
         }
