@@ -27,6 +27,12 @@ void Store::put(const String& id, const Slot& slot_in, const String& connector_i
     // mark_failed, но это не ошибка, а осознанный вызов put() «как раньше».
     if (connector_id.length() > 0) {
         owner_[id] = connector_id;
+        // Коннектор ожил — заглушка причины отказа не должна висеть в статусе
+        // рядом с живым значением.
+        std::string status_id(connector_id.c_str());
+        status_id += ".status";
+        items_.erase(String(status_id.c_str()));
+        owner_.erase(String(status_id.c_str()));
     }
 }
 

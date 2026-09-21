@@ -971,6 +971,36 @@ static void test_decimate_keeps_last_input_point(void) {
     TEST_ASSERT_EQUAL_FLOAT(99.0f, out[23]);
 }
 
+// ── mark_failed: заглушка причины для коннектора без слотов ────────────
+
+static void test_mark_failed_without_slots_creates_status_placeholder(void) {
+    // Холодный старт с 401/403: коннектор ничего не положил, но причина отказа
+    // должна быть видна в /api/status — иначе «нужен VPN» никто не увидит.
+    slots::Store store;
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    const slots::Slot* st = store.find(String("claude.status"));
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_FALSE(st->ok);
+    TEST_ASSERT_EQUAL_STRING("сервер просит подождать (429)", st->error.c_str());
+}
+
+static void test_mark_failed_without_reason_creates_nothing(void) {
+    slots::Store store;
+    store.mark_failed(String("claude"), String(""));
+    TEST_ASSERT_NULL(store.find(String("claude.status")));
+    TEST_ASSERT_EQUAL_UINT32(0, store.size());
+}
+
+static void test_status_placeholder_removed_when_connector_recovers(void) {
+    // Данные пришли — устаревшая причина не должна стоять рядом с живым слотом.
+    slots::Store store;
+    store.mark_failed(String("claude"), String("429"));
+    slots::Slot v; v.text = String("57"); v.ok = true; v.at = 100; v.ttl = 300;
+    store.put(String("limit.claude.5h"), v, String("claude"));
+    TEST_ASSERT_NULL(store.find(String("claude.status")));
+    TEST_ASSERT_NOT_NULL(store.find(String("limit.claude.5h")));
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -1101,6 +1131,10 @@ int main() {
     RUN_TEST(test_parse_http_response_has_history_mapping_is_skipped);
 
     RUN_TEST(test_decimate_keeps_last_input_point);
+
+    RUN_TEST(test_mark_failed_without_slots_creates_status_placeholder);
+    RUN_TEST(test_mark_failed_without_reason_creates_nothing);
+    RUN_TEST(test_status_placeholder_removed_when_connector_recovers);
 
     return UNITY_END();
 }
