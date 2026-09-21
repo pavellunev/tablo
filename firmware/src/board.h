@@ -21,6 +21,14 @@ constexpr int8_t SPI_MOSI = 9;
 constexpr uint16_t SCREEN_WIDTH = 800;
 constexpr uint16_t SCREEN_HEIGHT = 480;
 
+// ── кнопки ──
+// Три пользовательские кнопки платы. Подтянуты к питанию, нажатие даёт LOW.
+// Номера — из описания платы в CircuitPython (pins.c: BTN1..BTN3), оно же
+// подтвердило нашу карту дисплея, снятую с живого устройства.
+constexpr int8_t BUTTON_1 = 2;
+constexpr int8_t BUTTON_2 = 3;
+constexpr int8_t BUTTON_3 = 5;
+
 // ── батарея ──
 // Делитель обесточен, пока BATTERY_ENABLE не поднят: без этого ADC читает
 // ноль, а вычисленное по нему напряжение уходит в абсурд (в предшественнике

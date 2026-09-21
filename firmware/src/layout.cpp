@@ -181,6 +181,16 @@ void draw_sparkline(Canvas& c, Rect r, const float* raw_values, uint8_t count,
         if (values[i] > hi) hi = values[i];
     }
     float range = hi - lo;
+    // Минимальный диапазон — 1% от величины. Иначе две первые точки после
+    // включения рисуются клином на всю высоту блока: их разница и есть весь
+    // диапазон, и колебание курса в десятые процента читается как обвал.
+    const float mid = (hi + lo) * 0.5f;
+    const float floor_range = (mid < 0 ? -mid : mid) * 0.01f;
+    if (range < floor_range) {
+        lo = mid - floor_range * 0.5f;
+        hi = mid + floor_range * 0.5f;
+        range = hi - lo;
+    }
     if (range < 1e-6f) range = 1.0f;
 
     int16_t prev_x = 0, prev_y = 0;
@@ -190,6 +200,8 @@ void draw_sparkline(Canvas& c, Rect r, const float* raw_values, uint8_t count,
                                           ((values[i] - lo) / range) * (r.h - 1));
         if (i > 0) {
             c.line(prev_x, prev_y, x, y, Color::Black);
+            c.line(prev_x, static_cast<int16_t>(prev_y + 1), x, static_cast<int16_t>(y + 1),
+                   Color::Black);
             // Заливаем столбцы между предыдущей и текущей точкой, интерполируя
             // высоту кривой: иначе растр отстаёт от линии на крутых участках.
             for (int16_t px = fill_below ? prev_x : x + 1; px <= x; ++px) {
@@ -333,7 +345,7 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
         x = static_cast<int16_t>(x - w);
         draw_text(c, fonts::Terminus14, x, 38, batt_buf, Color::Black, 1, /*bold=*/true);
         x = static_cast<int16_t>(x - 4 - 22);
-        draw_battery_icon(c, x, 24, d.battery_pct);
+        draw_battery_icon(c, x, 26, d.battery_pct);  // низ на базовой линии текста (38)
     } else {
         const char* usb = "USB";
         int16_t w = text_width(fonts::Terminus14, usb);
@@ -341,7 +353,7 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
         draw_text(c, fonts::Terminus14, x, 38, usb, Color::Black, 1, /*bold=*/true);
     }
     x = static_cast<int16_t>(x - 16 - 22);
-    draw_wifi_bars(c, x, 20, wifi_bars(d.wifi_rssi));
+    draw_wifi_bars(c, x, 22, wifi_bars(d.wifi_rssi));  // низ на базовой линии текста (38)
 
     c.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(c.width() - 2 * MARGIN), 2,
                 Color::Black);
@@ -434,7 +446,10 @@ void draw_limit_row(Canvas& c, Rect area, const char* window_label, const Slot* 
     int16_t bar_x = static_cast<int16_t>(area.x + label_w + 8);
     int16_t bar_w = static_cast<int16_t>(area.w - label_w - 8 - pw - 8);
     if (bar_w > 0) {
-        draw_segbar(c, Rect{bar_x, area.y, bar_w, 14}, has_data(s) ? s->number : 0, segments);
+        // Полоса показывает использование, число рядом — остаток: так делает
+        // интерфейс Anthropic, и так поставил владелец. Слот несёт остаток,
+        // поэтому заполнение — дополнение до ста.
+        draw_segbar(c, Rect{bar_x, area.y, bar_w, 14}, has_data(s) ? 100.0f - s->number : 0, segments);
     }
     draw_text(c, fonts::PlexMono16, static_cast<int16_t>(area.x + area.w - pw),
               static_cast<int16_t>(area.y + 12), pct.c_str(), Color::Black);
@@ -469,10 +484,13 @@ void draw_state_tag(Canvas& c, int16_t right_x, int16_t baseline_y, const char* 
         c.fill_rect(x, static_cast<int16_t>(baseline_y - 12), plate_w, 16, Color::Black);
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(x + kPadX), baseline_y, label,
                   Color::White, 1, /*bold=*/true);
-    } else if (quiet) {
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(right_x - tw), baseline_y, label,
-                  Color::Black, 1, /*bold=*/true);
     } else {
+        // Единый стиль для «СВЕЖО» и «НОРМА» — рамка. В эталоне спокойное
+        // состояние шло без рамки и полупрозрачным, но на однобитной панели
+        // прозрачности нет, и бейдж без обводки читался как выпавший из ряда
+        // (замечание с живого экрана). Различие несёт только тревога: она
+        // инверсная. `quiet` остаётся в сигнатуре — им решают, что писать.
+        (void) quiet;
         constexpr int16_t kPadX = 6;
         int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
         int16_t x = static_cast<int16_t>(right_x - plate_w);
@@ -514,11 +532,19 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     constexpr int16_t kSparkH = 18;
     float spark[Slot::kHistoryCapacity + 1];
     uint8_t n = build_spark(*s, spark, static_cast<uint8_t>(Slot::kHistoryCapacity + 1));
-    draw_sparkline(c, Rect{area.x, spark_top, area.w, kSparkH}, spark, n);
-
     bool alarm = is_alarm(s->number);
     bool quiet = !alarm && is_quiet(s->number);
     const char* state = alarm ? "ПРОВЕТРИТЬ" : (quiet ? "СВЕЖО" : "НОРМА");
+    // График не доходит до правого края: там стоит бейдж состояния, и линия
+    // проходила прямо по нему — на живой панели «НОРМА» читалась сквозь
+    // штрих. Ширина бейджа известна заранее: текст плюс 6px полей с каждой
+    // стороны (см. draw_state_tag), плюс зазор.
+    const int16_t tag_w = static_cast<int16_t>(text_width(fonts::Terminus14, state) + 12);
+    const int16_t spark_w = static_cast<int16_t>(area.w - tag_w - 8);
+    if (spark_w > 20) {
+        draw_sparkline(c, Rect{area.x, spark_top, spark_w, kSparkH}, spark, n);
+    }
+
     draw_state_tag(c, static_cast<int16_t>(area.x + area.w),
                    static_cast<int16_t>(spark_top + kSparkH + 6), state, alarm, quiet);
 }
@@ -543,7 +569,10 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
     int16_t y = r.y;
 
     if (has_limits) {
-        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "ЛИМИТЫ");
+        // «· ОСТАТОК» — явное указание, что число в шкале ниже показывает
+        // ОСТАТОК, а не использование (задача: слот теперь несёт
+        // remaining_percent(), не utilization — connectors.cpp).
+        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "ЛИМИТЫ · ОСТАТОК");
         int16_t cursor = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET);
 
         if (has_claude) {
@@ -582,7 +611,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rec
             int16_t pw = text_width(fonts::PlexMono20, pct.c_str());
             int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
             if (bar_w > 0) {
-                draw_segbar(c, Rect{r.x, bar_y, bar_w, 14}, codex->number,
+                draw_segbar(c, Rect{r.x, bar_y, bar_w, 14}, 100.0f - codex->number,  // полоса — использование, число — остаток
                             segments_for_width(bar_w));
             }
             draw_text(c, fonts::PlexMono20, static_cast<int16_t>(r.x + r.w - pw),

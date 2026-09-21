@@ -249,6 +249,72 @@ static void test_to_json_with_secrets_includes_ap_password() {
     TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "SECRETPASS"));
 }
 
+// ── refresh_token/username (IMAP-логин, OAuth Claude) — секреты того же
+// класса, что token: сокрыты в to_json(..., false), переживают сохранение
+// формы без явного значения, как и token выше.
+
+static void test_to_json_without_secrets_hides_refresh_token_and_username() {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "claude";
+    conn.refresh_token = "refresh-secret";
+    conn.username = "user@example.com";
+    settings.connectors.push_back(conn);
+
+    String json = config::to_json(settings, /*include_secrets=*/false);
+
+    TEST_ASSERT_NULL(strstr(json.c_str(), "refresh-secret"));
+    TEST_ASSERT_NULL(strstr(json.c_str(), "user@example.com"));
+    TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "refresh_token_set"));
+    TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "username_set"));
+}
+
+static void test_to_json_with_secrets_includes_refresh_token_and_username() {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "claude";
+    conn.refresh_token = "refresh-secret";
+    conn.username = "user@example.com";
+    settings.connectors.push_back(conn);
+
+    String json = config::to_json(settings, /*include_secrets=*/true);
+
+    TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "refresh-secret"));
+    TEST_ASSERT_NOT_NULL(strstr(json.c_str(), "user@example.com"));
+}
+
+static void test_from_json_missing_refresh_token_keeps_previous() {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "claude";
+    conn.refresh_token = "refresh-secret";
+    conn.username = "user@example.com";
+    settings.connectors.push_back(conn);
+
+    String payload = "{\"connectors\":[{\"id\":\"claude\",\"refresh_token\":\"\",\"username\":\"\"}]}";
+    config::from_json(payload, settings);
+
+    TEST_ASSERT_EQUAL_STRING("refresh-secret", settings.connectors[0].refresh_token.c_str());
+    TEST_ASSERT_EQUAL_STRING("user@example.com", settings.connectors[0].username.c_str());
+}
+
+static void test_round_trip_keeps_refresh_token_and_username() {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "claude";
+    conn.refresh_token = "refresh-secret";
+    conn.username = "user@example.com";
+    settings.connectors.push_back(conn);
+
+    String raw = config::to_json(settings, /*include_secrets=*/true);
+
+    config::Settings loaded;
+    config::from_json(raw, loaded);
+
+    TEST_ASSERT_EQUAL_STRING("refresh-secret", loaded.connectors[0].refresh_token.c_str());
+    TEST_ASSERT_EQUAL_STRING("user@example.com", loaded.connectors[0].username.c_str());
+}
+
 static void test_from_json_missing_ap_password_keeps_previous() {
     config::Settings settings;
     settings.ap_password = "SECRETPASS";
@@ -260,6 +326,130 @@ static void test_from_json_missing_ap_password_keeps_previous() {
     config::from_json(payload, settings);
 
     TEST_ASSERT_EQUAL_STRING("SECRETPASS", settings.ap_password.c_str());
+}
+
+// ── SlotMapping: новые поля (дельта, история) переживают сохранение ──
+
+static void test_round_trip_keeps_slot_mapping_extras() {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "btc_history";
+    conn.kind = "http";
+    config::SlotMapping m;
+    m.slot = "btc";
+    m.source = "lastPrice";
+    m.ttl = 900;
+    m.delta_source = "priceChangePercent";
+    m.delta_is_previous = true;
+    m.has_history = true;
+    m.history_source = "prices";
+    m.history_item = "4";
+    conn.map.push_back(m);
+    settings.connectors.push_back(conn);
+
+    String raw = config::to_json(settings, /*include_secrets=*/true);
+    config::Settings loaded;
+    config::from_json(raw, loaded);
+
+    TEST_ASSERT_EQUAL(1, loaded.connectors[0].map.size());
+    const config::SlotMapping& lm = loaded.connectors[0].map[0];
+    TEST_ASSERT_EQUAL_STRING("priceChangePercent", lm.delta_source.c_str());
+    TEST_ASSERT_TRUE(lm.delta_is_previous);
+    TEST_ASSERT_TRUE(lm.has_history);
+    TEST_ASSERT_EQUAL_STRING("prices", lm.history_source.c_str());
+    TEST_ASSERT_EQUAL_STRING("4", lm.history_item.c_str());
+}
+
+// ── Settings.city / city_resolved / city_lat / city_lon ──
+
+static void test_from_json_missing_city_keeps_previous() {
+    config::Settings settings;
+    settings.city = "Лиссабон";
+    settings.city_resolved = "Лиссабон";
+    settings.city_lat = 38.7f;
+    settings.city_lon = -9.1f;
+
+    // Форма не редактирует city_resolved/city_lat/city_lon вовсе (см.
+    // config.h) — их отсутствие в присланном JSON означает «не трогали».
+    String payload = "{}";
+    config::from_json(payload, settings);
+
+    TEST_ASSERT_EQUAL_STRING("Лиссабон", settings.city.c_str());
+    TEST_ASSERT_EQUAL_STRING("Лиссабон", settings.city_resolved.c_str());
+    TEST_ASSERT_EQUAL_FLOAT(38.7f, settings.city_lat);
+    TEST_ASSERT_EQUAL_FLOAT(-9.1f, settings.city_lon);
+}
+
+static void test_round_trip_keeps_city_fields() {
+    config::Settings settings;
+    settings.city = "Екатеринбург";
+    settings.city_resolved = "Екатеринбург";
+    settings.city_lat = 56.8389f;
+    settings.city_lon = 60.6057f;
+
+    String raw = config::to_json(settings, /*include_secrets=*/true);
+    config::Settings loaded;
+    config::from_json(raw, loaded);
+
+    TEST_ASSERT_EQUAL_STRING("Екатеринбург", loaded.city.c_str());
+    TEST_ASSERT_EQUAL_STRING("Екатеринбург", loaded.city_resolved.c_str());
+    TEST_ASSERT_EQUAL_FLOAT(56.8389f, loaded.city_lat);
+    TEST_ASSERT_EQUAL_FLOAT(60.6057f, loaded.city_lon);
+}
+
+// ── merge_missing_factory_connectors: миграция уже настроенных устройств ──
+
+static void test_merge_missing_factory_connectors_adds_new_by_id() {
+    config::Settings settings;
+    config::Connector existing;
+    existing.id = "home";
+    existing.kind = "homeassistant";
+    existing.token = "my-token";
+    settings.connectors.push_back(existing);
+
+    config::merge_missing_factory_connectors(settings);
+
+    bool has_geocode = false, has_btc_history = false;
+    for (const auto& c : settings.connectors) {
+        if (c.id == "geocode") has_geocode = true;
+        if (c.id == "btc_history") has_btc_history = true;
+    }
+    TEST_ASSERT_TRUE(has_geocode);
+    TEST_ASSERT_TRUE(has_btc_history);
+    // Существующий коннектор не тронут — токен на месте.
+    for (const auto& c : settings.connectors) {
+        if (c.id == "home") TEST_ASSERT_EQUAL_STRING("my-token", c.token.c_str());
+    }
+}
+
+static void test_merge_missing_factory_connectors_replaces_changed_kind() {
+    config::Settings settings;
+    config::Connector old_weather;
+    old_weather.id = "weather";
+    old_weather.kind = "http";  // старая заводская схема, до geocode/city
+    old_weather.url = "https://api.open-meteo.com/v1/forecast?latitude=56.84&longitude=60.65";
+    settings.connectors.push_back(old_weather);
+
+    config::merge_missing_factory_connectors(settings);
+
+    for (const auto& c : settings.connectors) {
+        if (c.id == "weather") TEST_ASSERT_EQUAL_STRING("weather", c.kind.c_str());
+    }
+}
+
+static void test_merge_missing_factory_connectors_keeps_user_edited_connector() {
+    config::Settings settings;
+    config::Connector btc;
+    btc.id = "btc";
+    btc.kind = "http";
+    btc.url = "https://example.com/custom-btc";  // владелец подменил адрес сам
+    settings.connectors.push_back(btc);
+
+    config::merge_missing_factory_connectors(settings);
+
+    for (const auto& c : settings.connectors) {
+        if (c.id == "btc") TEST_ASSERT_EQUAL_STRING("https://example.com/custom-btc", c.url.c_str());
+    }
 }
 
 int main() {
@@ -277,11 +467,23 @@ int main() {
     RUN_TEST(test_to_json_with_secrets_includes_password_and_token);
     RUN_TEST(test_from_json_missing_insecure_defaults_to_false);
 
+    RUN_TEST(test_to_json_without_secrets_hides_refresh_token_and_username);
+    RUN_TEST(test_to_json_with_secrets_includes_refresh_token_and_username);
+    RUN_TEST(test_from_json_missing_refresh_token_keeps_previous);
+    RUN_TEST(test_round_trip_keeps_refresh_token_and_username);
+
     RUN_TEST(test_ap_password_from_bytes_maps_through_alphabet);
     RUN_TEST(test_ap_password_from_bytes_wraps_modulo_alphabet_length);
     RUN_TEST(test_to_json_without_secrets_hides_ap_password);
     RUN_TEST(test_to_json_with_secrets_includes_ap_password);
     RUN_TEST(test_from_json_missing_ap_password_keeps_previous);
+
+    RUN_TEST(test_round_trip_keeps_slot_mapping_extras);
+    RUN_TEST(test_from_json_missing_city_keeps_previous);
+    RUN_TEST(test_round_trip_keeps_city_fields);
+    RUN_TEST(test_merge_missing_factory_connectors_adds_new_by_id);
+    RUN_TEST(test_merge_missing_factory_connectors_replaces_changed_kind);
+    RUN_TEST(test_merge_missing_factory_connectors_keeps_user_edited_connector);
 
     return UNITY_END();
 }

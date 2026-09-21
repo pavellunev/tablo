@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include "secrets.h"
+
 #include <ArduinoJson.h>
 
 #include <vector>
@@ -21,12 +23,38 @@ namespace {
 // ключи на каждое поле не дают выигрыша (пишем и читаем всё равно целиком —
 // см. «один владелец» в шапке файла), а лишний код по их синхронизации не нужен.
 constexpr const char* kNamespace = "inkroam";
-constexpr const char* kKey = "settings";
+// Два ключа — намеренно. Раньше настройки лежали строкой под «settings»;
+// blob под тем же ключом NVS не примет: тип записи не совпадает, nvs_set_blob
+// отвечает TYPE_MISMATCH, и save() возвращал false — на уже настроенном
+// устройстве после обновления прошивки НИЧЕГО нельзя было сохранить, а
+// выглядело оно здоровым: чтение-то шло через откат на строку. Поэтому blob
+// живёт под своим ключом, старая строка читается как запасной источник и
+// удаляется только после успешной записи blob — окна без настроек нет.
+constexpr const char* kKeyLegacy = "settings";    // строка, формат до blob
+constexpr const char* kKey = "settings_b";         // blob
 
 Settings defaults() {
     Settings s;
     s.device_name = "inkroam-setup";
-    s.timezone_minutes = 300;  // Екатеринбург, +05:00
+    // Домашняя сеть — заводская, из secrets.h: после перепрошивки или сброса
+    // устройство подключается само, а не ждёт настройки с телефона. Пустой
+    // SSID в secrets — сети нет, поднимется точка доступа как раньше.
+    if (String(WIFI_SSID_DEFAULT).length() > 0) {
+        Network home_net;
+        home_net.ssid = WIFI_SSID_DEFAULT;
+        home_net.password = WIFI_PASSWORD_DEFAULT;
+        s.networks.push_back(home_net);
+    }
+    s.timezone_minutes = 300;  // Екатеринбург, +05:00 — до первого геокодинга
+
+    // Заводской город. Координаты и city_resolved заполнены заранее (а не
+    // оставлены пустыми до первого выхода в сеть), чтобы погода работала
+    // сразу на новом устройстве — коннектор kind="geocode" молчит, пока
+    // city == city_resolved (docs/constructor.md, «Город вместо координат»).
+    s.city = "Екатеринбург";
+    s.city_resolved = "Екатеринбург";
+    s.city_lat = 56.8389f;
+    s.city_lon = 60.6057f;
 
     // Заводские источники. Устройство берёт всё, что доступно публично, само
     // — в этом и смысл проекта: оно не должно зависеть от домашнего сервера,
@@ -49,6 +77,8 @@ Settings defaults() {
     };
 
     // Курс биткоина: публичный, без ключа, изменение за сутки тем же запросом.
+    // priceChangePercent — то же тело ответа, что и текущая цена: дельта не
+    // требует отдельного похода в сеть (docs/decisions.md, задача про дельты).
     //
     // Не CoinGecko, хотя он был первым кандидатом: его цепочку подписывает
     // Google Trust Services, и проверка на устройстве не проходит — в логе
@@ -57,33 +87,135 @@ Settings defaults() {
     // курса дороже, чем взять источник, чей удостоверяющий центр работает
     // (DigiCert, проверено на живом устройстве).
     add("btc", "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", 300,
-        {{"btc", "lastPrice", 900}});
+        {{"btc", "lastPrice", 900, "priceChangePercent"}});
+
+    // История курса за 24 часа — отдельным запросом и отдельным интервалом
+    // опроса (30 минут, не 5): часовые свечи всё равно не меняются чаще, а
+    // накопление одной точки на каждый обычный опрос в Store уже показало
+    // себя лживым (подпись «ЗА 24 Ч» при часе реальных данных). "4" — индекс
+    // цены закрытия в каждой свече Binance ([open_time, open, high, low,
+    // close, ...]).
+    {
+        Connector btc_history;
+        btc_history.id = "btc_history";
+        btc_history.kind = "http";
+        btc_history.url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=24";
+        btc_history.interval = 1800;
+        SlotMapping history_map;
+        history_map.slot = "btc";
+        history_map.has_history = true;
+        history_map.history_item = "4";
+        btc_history.map.push_back(history_map);
+        s.connectors.push_back(btc_history);
+    }
 
     // Официальный курс ЦБ: обновляется раз в сутки, чаще пяти минут спрашивать
     // незачем, но и реже нельзя — иначе утренний курс приедет к обеду.
+    // Value/Previous — то, что реально отдаёт ЦБ (готового процента
+    // изменения в ответе нет), delta_is_previous просит parse_http_response
+    // посчитать (value-previous)/previous*100 самому.
     add("fiat", "https://www.cbr-xml-daily.ru/daily_json.js", 900,
-        {{"usd_rub", "Valute.USD.Value", 86400},
-         {"eur_rub", "Valute.EUR.Value", 86400}});
+        {{"usd_rub", "Valute.USD.Value", 86400, "Valute.USD.Previous", true},
+         {"eur_rub", "Valute.EUR.Value", 86400, "Valute.EUR.Previous", true}});
 
-    // Погода по координатам, без ключа и без привязки к дому: в поездке
-    // координаты меняются на странице настройки, и блок продолжает работать.
-    add("weather", "https://api.open-meteo.com/v1/forecast"
-                   "?latitude=56.84&longitude=60.65&current=temperature_2m"
-                   "&timezone=Asia%2FYekaterinburg",
-        1800,
-        {{"weather.temp", "current.temperature_2m", 3600}});
+    // Погода — по координатам города (city_lat/city_lon в Settings, не в
+    // адресе коннектора: они меняются геокодингом, а не формой настройки).
+    // kind="weather" сам строит адрес на каждый опрос из текущих координат;
+    // map ниже — как у обычного http, current/daily разбираются тем же
+    // walk_path (индекс массива daily.*.0 уже умеет).
+    {
+        Connector weather;
+        weather.id = "weather";
+        weather.kind = "weather";
+        weather.interval = 1800;
+        weather.map.push_back({"weather.temp", "current.temperature_2m", 3600});
+        weather.map.push_back({"weather.low", "daily.temperature_2m_min.0", 86400});
+        weather.map.push_back({"weather.high", "daily.temperature_2m_max.0", 86400});
+        s.connectors.push_back(weather);
+    }
+
+    // Геокодинг города в координаты (docs/constructor.md, «Погода и часовой
+    // пояс»): молчит, пока Settings.city_resolved == Settings.city — то есть
+    // почти всегда, кроме первого запуска после смены города владельцем.
+    // В режиме точки доступа сети нет вовсе (poll_due не вызывается —
+    // main.cpp), поэтому геокодинг честно откладывается до первого выхода в
+    // сеть, как и требует задача.
+    {
+        Connector geocode;
+        geocode.id = "geocode";
+        geocode.kind = "geocode";
+        geocode.interval = 3600;  // раз в час достаточно проверять «не сменился ли город»
+        s.connectors.push_back(geocode);
+    }
 
     // Датчики воздуха — единственное, что без Home Assistant взять неоткуда:
     // они физически стоят в кабинете. Токен вводится на странице настройки.
+    // has_history — история за 6 часов тем же периодом, что использовал
+    // предшественник (trmnl-ink/renderer/app/providers/air.py, HISTORY_WINDOW).
     Connector home;
     home.id = "home";
     home.kind = "homeassistant";
-    home.url = "http://192.168.1.2:8123";
+    home.url = HA_URL_DEFAULT;
+    home.token = HA_TOKEN_DEFAULT;  // см. secrets.h, в репозиторий не попадает
     home.interval = 300;
     home.insecure = false;
-    home.map.push_back({"co2", "sensor.abinetco2", 600});
-    home.map.push_back({"tvoc", "sensor.abinetairquality", 600});
+    {
+        SlotMapping co2_map;
+        co2_map.slot = "co2";
+        co2_map.source = "sensor.abinetco2";
+        co2_map.ttl = 600;
+        co2_map.has_history = true;
+        home.map.push_back(co2_map);
+
+        SlotMapping tvoc_map;
+        tvoc_map.slot = "tvoc";
+        tvoc_map.source = "sensor.abinetairquality";
+        tvoc_map.ttl = 600;
+        tvoc_map.has_history = true;
+        home.map.push_back(tvoc_map);
+    }
     s.connectors.push_back(home);
+
+    // Лимиты AI-подписок и почта — устройство ходит за ними само (OAuth и
+    // IMAP разбираются прямо на нём, см. connectors.cpp и docs/decisions.md,
+    // п.2 — решение и его причина записаны там честно, включая то, что
+    // раньше здесь стоял посредник-приложение). Токены и пароль ящика — в
+    // secrets.h, не в этом файле, ровно как HA_TOKEN_DEFAULT выше.
+
+    // Лимиты Claude: access_token живёт около восьми часов, дальше API
+    // отвечает 401 — connectors.cpp обновляет его сам через refresh_token
+    // (POST на console.anthropic.com/v1/oauth/token) и сохраняет новую пару
+    // в NVS через config::save(), иначе обновление не пережило бы перезагрузку.
+    Connector claude;
+    claude.id = "claude";
+    claude.kind = "anthropic";
+    claude.token = CLAUDE_ACCESS_TOKEN_DEFAULT;
+    claude.refresh_token = CLAUDE_REFRESH_TOKEN_DEFAULT;
+    claude.interval = 300;  // 5 минут — TLS-соединение недёшево, лимит не скачет секундами
+    s.connectors.push_back(claude);
+
+    // Лимиты Codex (ChatGPT): тот же принцип Bearer-токена, но без
+    // обновления — задача явно описывает refresh только для Claude; протухший
+    // токен здесь просто гасит слот до следующей ручной подстановки в secrets.h.
+    Connector codex;
+    codex.id = "codex";
+    codex.kind = "codex";
+    codex.token = CODEX_ACCESS_TOKEN_DEFAULT;
+    codex.interval = 300;
+    s.connectors.push_back(codex);
+
+    // Непрочитанные письма: IMAP поверх TLS, три команды протокола
+    // (LOGIN/SELECT/SEARCH UNSEEN) — не полноценный клиент, он тут не нужен.
+    // url хранит хост IMAP-сервера (не URL в привычном смысле — то же поле,
+    // что у остальных коннекторов, лишнего не заводим).
+    Connector mail;
+    mail.id = "mail";
+    mail.kind = "imap";
+    mail.url = "imap.gmail.com";
+    mail.username = IMAP_USER_DEFAULT;
+    mail.token = IMAP_PASSWORD_DEFAULT;  // пароль приложения Gmail, по аналогии с token
+    mail.interval = 900;  // 15 минут — почта не требует опроса чаще
+    s.connectors.push_back(mail);
 
     return s;
 }
@@ -100,6 +232,22 @@ String find_password(const Settings& prev, const String& ssid) {
 String find_token(const Settings& prev, const String& id) {
     for (const auto& conn : prev.connectors) {
         if (conn.id == id) return conn.token;
+    }
+    return "";
+}
+
+// По той же схеме, что и token: секрет ищется у прежнего коннектора по id,
+// а не по индексу — форма могла переставить коннекторы местами.
+String find_refresh_token(const Settings& prev, const String& id) {
+    for (const auto& conn : prev.connectors) {
+        if (conn.id == id) return conn.refresh_token;
+    }
+    return "";
+}
+
+String find_username(const Settings& prev, const String& id) {
+    for (const auto& conn : prev.connectors) {
+        if (conn.id == id) return conn.username;
     }
     return "";
 }
@@ -158,7 +306,68 @@ String generate_ap_password() {
     }
     return ap_password_from_bytes(bytes, kApPasswordLength);
 }
+
+// Читает сохранённый JSON как blob (см. save() — putBytes, не putString, из-за
+// предела строк NVS в 4000 байт). getBytesLength()==0 означает и «ключа нет
+// вовсе» (первый запуск), и «ключ есть, но другого типа» — оба случая здесь
+// неотличимы, но для обоих правильно попробовать старый putString()-формат:
+// устройства, настроенные ДО этой правки, хранят JSON именно так, и без этого
+// отката load() увидел бы их как пустые настройки — терялись бы сети,
+// коннекторы, пароль точки доступа. Следующий save() перезапишет запись уже
+// блобом, второй раз откат не понадобится.
+String read_raw_settings(Preferences& prefs) {
+    size_t blob_len = prefs.getBytesLength(kKey);
+    if (blob_len > 0) {
+        std::vector<char> buf(blob_len + 1);
+        prefs.getBytes(kKey, buf.data(), blob_len);
+        buf[blob_len] = '\0';
+        return String(buf.data());
+    }
+    // Под старым ключом может лежать И строка (совсем старая прошивка), И blob
+    // (промежуточная версия писала blob под этим же ключом). getString на
+    // blob-ключе молча возвращает пусто — ровно так одна из заливок приняла
+    // настроенное устройство за чистое, записала заводские значения и стёрла
+    // ключ с настоящими настройками. Поэтому пробуем оба типа.
+    size_t legacy_blob = prefs.getBytesLength(kKeyLegacy);
+    if (legacy_blob > 0) {
+        std::vector<char> buf(legacy_blob + 1);
+        prefs.getBytes(kKeyLegacy, buf.data(), legacy_blob);
+        buf[legacy_blob] = '\0';
+        Serial.println("config: настройки прочитаны из старого ключа (blob)");
+        return String(buf.data());
+    }
+    String legacy = prefs.getString(kKeyLegacy, "");
+    if (legacy.length() > 0) {
+        Serial.println("config: настройки прочитаны из старого ключа (строка)");
+    }
+    return legacy;
+}
 #endif
+
+// Устройство, уже настроенное до появления новых заводских источников
+// (btc_history, geocode, «weather» сменил kind с http на специализированный)
+// не должно ждать полного сброса настроек, чтобы их получить — иначе
+// обновление прошивки на живом устройстве тихо теряет часть кадра. Довешивает
+// отсутствующие по id заводские коннекторы, не трогая то, что владелец уже
+// настроил сам (токены, url, map пользовательских записей не задеты).
+// Коннектор, у которого сменился kind (единственный прецедент — «weather»),
+// заменяется заводским целиком: он не несёт секретов, которые было бы жаль
+// потерять, а старый kind без этой замены продолжал бы работать по старой
+// схеме (статические координаты) вечно.
+void merge_missing_factory_connectors(Settings& settings) {
+    Settings factory = defaults();
+    for (const auto& fc : factory.connectors) {
+        bool exists = false;
+        for (auto& ec : settings.connectors) {
+            if (ec.id == fc.id) {
+                exists = true;
+                if (ec.kind != fc.kind) ec = fc;
+                break;
+            }
+        }
+        if (!exists) settings.connectors.push_back(fc);
+    }
+}
 
 }  // namespace
 
@@ -177,12 +386,39 @@ Settings load() {
     Settings settings = defaults();
 
     Preferences prefs;
+    bool from_legacy = false;
+    bool read_failed = false;
+    bool legacy_leftover = false;
+    bool networks_restored = false;
     if (prefs.begin(kNamespace, /*readOnly=*/true)) {
-        String raw = prefs.getString(kKey, "");
+        const bool any_key = prefs.isKey(kKey) || prefs.isKey(kKeyLegacy);
+        // Оба ключа проверяем, пока хранилище открыто: после prefs.end()
+        // Preferences молча отвечает «нет» на любой вопрос, и флаг ниже был бы
+        // всегда ложным — зачистка мёртвого ключа не сработала бы никогда.
+        const bool both_keys = prefs.getBytesLength(kKey) > 0 && prefs.isKey(kKeyLegacy);
+        String raw = read_raw_settings(prefs);
+        // Переносить в blob можно только то, что реально прочитано И разобрано:
+        // пустая строка или битый JSON — не «нет настроек», а «не смогли
+        // прочитать», и запись заводских значений поверх стирает настоящие.
+        from_legacy = prefs.getBytesLength(kKey) == 0 && prefs.isKey(kKeyLegacy) &&
+                      !raw.isEmpty();
         prefs.end();
-        if (!raw.isEmpty() && !from_json(raw, settings)) {
-            settings = defaults();
+        bool parsed = false;
+        if (!raw.isEmpty()) {
+            parsed = from_json(raw, settings);
+            if (!parsed) {
+                settings = defaults();
+                from_legacy = false;
+            }
         }
+        // Ключ есть, а содержимого не получили — запись в этой загрузке
+        // запрещена целиком: заводские значения живут в ОЗУ, NVS не трогаем,
+        // настоящие настройки остаются восстановимыми.
+        read_failed = any_key && !parsed;
+        // Оба ключа сразу — обрыв питания между записью blob и удалением
+        // старого ключа в прошлой миграции. Данные уже взяты из blob, старый
+        // ключ только занимает ~4 КБ из 20 и роняет потолок обновлений.
+        legacy_leftover = parsed && both_keys;
 
         // Сохранённые настройки без единого источника данных — это устройство,
         // настроенное до того, как источники появились в прошивке: человек
@@ -190,8 +426,18 @@ Settings load() {
         // применяются никогда. Экран в такой ситуации остаётся пустым без
         // единой ошибки. Подставляем заводские источники, не трогая сети и
         // пароль точки доступа — их владелец задавал сам.
+        // Сохранённые настройки без единой сети — устройство, чьи настройки
+        // стёрла неудачная миграция, либо записанные до появления заводской
+        // сети в secrets.h. Без подстановки оно навсегда в точке доступа,
+        // хотя домашняя сеть известна.
+        if (settings.networks.empty() && !defaults().networks.empty()) {
+            settings.networks = defaults().networks;
+            networks_restored = true;
+        }
         if (settings.connectors.empty()) {
             settings.connectors = defaults().connectors;
+        } else {
+            merge_missing_factory_connectors(settings);
         }
     }
 
@@ -202,9 +448,48 @@ Settings load() {
     // записи: без него сгенерированный пароль не пережил бы перезагрузку и
     // генерировался бы заново на каждом старте, то есть остался бы тем же
     // «новым каждый раз», от которого мы уходим.
+    if (read_failed) {
+        Serial.println("config: НАСТРОЙКИ НЕ ПРОЧИТАНЫ — запись заблокирована, NVS не тронут");
+        if (settings.ap_password.isEmpty()) settings.ap_password = generate_ap_password();
+        return settings;  // пароль точки — на эту сессию, без сохранения
+    }
     if (settings.ap_password.isEmpty()) {
         settings.ap_password = generate_ap_password();
         save(settings);
+    }
+    if (networks_restored && !from_legacy) {
+        // Домашняя сеть подставлена в настройки без сетей — сохраняем один раз,
+        // чтобы дальше список сетей жил как есть и правился владельцем.
+        // Удаление всех сетей — не способ попасть в точку доступа (для этого
+        // предназначена кнопка, см. docs/decisions.md п.8), так что конфликта
+        // с намерением владельца здесь нет.
+        Serial.println(save(settings) ? "config: домашняя сеть восстановлена и сохранена"
+                                      : "config: домашняя сеть восстановлена, но НЕ сохранена");
+    }
+    if (legacy_leftover) {
+        Preferences cleanup;
+        if (cleanup.begin(kNamespace, /*readOnly=*/false)) {
+            cleanup.remove(kKeyLegacy);
+            cleanup.end();
+            Serial.println("config: удалён мёртвый старый ключ настроек");
+        }
+    }
+    if (from_legacy) {
+        // Переносим в blob здесь и сейчас: следующее сохранение может
+        // случиться через сутки (refresh токена), и всё это время устройство
+        // выглядело бы здоровым при неработающей записи. Старый ключ удаляем
+        // только здесь — после того как сами его прочитали, разобрали и
+        // успешно записали новый. Результат — в лог.
+        if (save(settings)) {
+            Preferences cleanup;
+            if (cleanup.begin(kNamespace, /*readOnly=*/false)) {
+                cleanup.remove(kKeyLegacy);
+                cleanup.end();
+            }
+            Serial.println("config: настройки перенесены в blob, старый ключ удалён");
+        } else {
+            Serial.println("config: ПЕРЕНОС В BLOB НЕ УДАЛСЯ — запись настроек не работает");
+        }
     }
     return settings;
 }
@@ -216,8 +501,33 @@ bool save(const Settings& settings) {
 
     Preferences prefs;
     if (!prefs.begin(kNamespace, /*readOnly=*/false)) return false;
-    size_t written = prefs.putString(kKey, raw);
+    // putBytes (тип "blob" в NVS), не putString: у строк в NVS жёсткий предел
+    // 4000 байт на значение (nvs_set_str, включая завершающий '\0'), у блобов
+    // — формально до 508000, но НАШ раздел nvs — 20 КБ (partitions.csv, 5
+    // страниц по 4 КБ, одна всегда свободна под сборку мусора), а обновление
+    // blob пишет новую копию до стирания старой: реальный потолок для JSON
+    // настроек здесь ≈ 8 КБ, дальше save() честно вернёт false. Сейчас
+    // занято ~4.3 КБ. Полный
+    // JSON с реальными токенами (OAuth Claude/Codex — сотни-полторы тысяч
+    // символов каждый) и картой коннекторов уже сам по себе подходил к этой
+    // границе вплотную; добавление delta/history-полей и города в эту же
+    // задачу вытолкнуло его за 4000 — putString() не просто отказывала с
+    // ESP_ERR_NVS_VALUE_TOO_LONG, а роняла устройство в LoadProhibited
+    // (поймано на живом устройстве, см. Status Log). Данные и так не текст в
+    // пользовательском смысле, а непрозрачный JSON — блоб им подходит не
+    // хуже строки.
+    size_t written = prefs.putBytes(kKey, raw.c_str(), raw.length());
+    // Старый ключ здесь НЕ удаляем: save() не знает, откуда пришли данные.
+    // Удаление делает только load() в ветке миграции — единственное место,
+    // которое само прочитало и разобрало содержимое старого ключа. Иначе
+    // save(заводские) из любой другой ветки стирал бы настоящие настройки.
     prefs.end();
+    if (written != raw.length()) {
+        // Отказ здесь молчать не должен: раньше он был невидим, и владелец
+        // узнал бы о нём по мёртвым лимитам после ротации токена.
+        Serial.printf("config: НЕ СОХРАНЕНО (%u из %u байт) — см. потолок размера выше\n",
+                      static_cast<unsigned>(written), static_cast<unsigned>(raw.length()));
+    }
     return written == raw.length();
 }
 
@@ -240,6 +550,17 @@ String to_json(const Settings& settings, bool include_secrets) {
     // const char* понимают обе стороны одинаково.
     doc["device_name"] = settings.device_name.c_str();
     doc["timezone_minutes"] = settings.timezone_minutes;
+
+    // Город и координаты — не секрет, отдаём всегда (не только внутреннему
+    // хранилищу): страница настройки должна честно показать, определились
+    // ли уже координаты, или город ещё ждёт первого выхода в сеть
+    // (docs/constructor.md, «Тонкость»). Хранить их нужно и во внутреннем
+    // JSON (include_secrets=true), иначе геокодинг терялся бы на каждой
+    // перезагрузке, как терялся бы map без своей строки в этом же файле.
+    doc["city"] = settings.city.c_str();
+    doc["city_resolved"] = settings.city_resolved.c_str();
+    doc["city_lat"] = settings.city_lat;
+    doc["city_lon"] = settings.city_lon;
 
     // Секрет ровно как токен коннектора ниже: наружу (GET /api/config,
     // include_secrets=false) не отдаём вовсе, не только маскируем — странице
@@ -272,8 +593,14 @@ String to_json(const Settings& settings, bool include_secrets) {
         o["interval"] = conn.interval;
         if (include_secrets) {
             o["token"] = conn.token.c_str();
+            o["refresh_token"] = conn.refresh_token.c_str();
+            o["username"] = conn.username.c_str();
         } else {
+            // refresh_token/username — секреты того же класса, что token
+            // (OAuth-токен Claude и логин почты), сокрыты тем же приёмом.
             o["token_set"] = !conn.token.isEmpty();
+            o["refresh_token_set"] = !conn.refresh_token.isEmpty();
+            o["username_set"] = !conn.username.isEmpty();
         }
         // Не секрет — отдаём всегда: страница настройки должна показывать
         // предупреждение о риске MITM независимо от того, кто читает
@@ -286,6 +613,16 @@ String to_json(const Settings& settings, bool include_secrets) {
             mo["slot"] = m.slot.c_str();
             mo["source"] = m.source.c_str();
             mo["ttl"] = m.ttl;
+            // Не секреты — заводские мэппинги (btc, fiat, home, btc_history)
+            // должны пережить перезагрузку так же, как slot/source/ttl выше;
+            // без этих трёх строк дельта и история заводских источников
+            // стирались бы на первом же сохранении настроек (тот же класс
+            // бага, что уже чинили с map целиком — см. Status Log).
+            mo["delta_source"] = m.delta_source.c_str();
+            mo["delta_is_previous"] = m.delta_is_previous;
+            mo["has_history"] = m.has_history;
+            mo["history_source"] = m.history_source.c_str();
+            mo["history_item"] = m.history_item.c_str();
         }
     }
 
@@ -327,6 +664,24 @@ bool from_json(const String& json, Settings& settings) {
     } else {
         settings.ap_password = prev.ap_password;
     }
+
+    // city — редактируемое поле формы (страница настройки шлёт его всегда,
+    // как device_name); city_resolved/city_lat/city_lon — внутренняя
+    // бухгалтерия геокодинга, форма их не присылает вовсе, и отсутствие в
+    // присланном JSON здесь всегда означает «не трогали» — тем же приёмом,
+    // что ap_password выше.
+    if (doc["city"].is<const char*>()) {
+        settings.city = doc["city"].as<const char*>();
+    } else {
+        settings.city = prev.city;
+    }
+    if (doc["city_resolved"].is<const char*>()) {
+        settings.city_resolved = doc["city_resolved"].as<const char*>();
+    } else {
+        settings.city_resolved = prev.city_resolved;
+    }
+    settings.city_lat = doc["city_lat"] | prev.city_lat;
+    settings.city_lon = doc["city_lon"] | prev.city_lon;
 
     settings.networks.clear();
     if (doc["networks"].is<JsonArray>()) {
@@ -374,6 +729,17 @@ bool from_json(const String& json, Settings& settings) {
             if (token.isEmpty()) token = find_token(prev, conn.id);
             conn.token = token;
 
+            // Тот же приём «пустое поле — не трогали»: страница настройки
+            // не отдаёт refresh_token/username обратно (to_json их прячет),
+            // а любая нормальная форма без явного значения не должна их стереть.
+            String refresh_token = c["refresh_token"] | "";
+            if (refresh_token.isEmpty()) refresh_token = find_refresh_token(prev, conn.id);
+            conn.refresh_token = refresh_token;
+
+            String username = c["username"] | "";
+            if (username.isEmpty()) username = find_username(prev, conn.id);
+            conn.username = username;
+
             // Явная галочка, не «оставить прежнее»: отсутствие поля — это
             // false, а не значение из prev. Так безопаснее в обе стороны —
             // и коннектор, добавленный без этого поля, не окажется случайно
@@ -391,6 +757,11 @@ bool from_json(const String& json, Settings& settings) {
                     sm.slot = m["slot"] | "";
                     sm.source = m["source"] | "";
                     sm.ttl = m["ttl"] | 300;
+                    sm.delta_source = m["delta_source"] | "";
+                    sm.delta_is_previous = m["delta_is_previous"] | false;
+                    sm.has_history = m["has_history"] | false;
+                    sm.history_source = m["history_source"] | "";
+                    sm.history_item = m["history_item"] | "";
                     if (sm.slot.isEmpty()) continue;
                     conn.map.push_back(sm);
                 }

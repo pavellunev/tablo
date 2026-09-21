@@ -234,6 +234,10 @@
     <label>Имя устройства (точки доступа)
       <input id="device-name" type="text" placeholder="inkroam-setup">
     </label>
+    <label>Город (погода и часовой пояс)
+      <input id="device-city" type="text" placeholder="Екатеринбург">
+    </label>
+    <p id="city-hint" class="empty"></p>
   </section>
 
 </main>
@@ -247,7 +251,10 @@
 <script>
 'use strict';
 
-var state = { device_name: '', timezone_minutes: 0, networks: [], connectors: [], canWrite: true };
+var state = {
+  device_name: '', timezone_minutes: 0, city: '', city_resolved: '', city_lat: 0, city_lon: 0,
+  networks: [], connectors: [], canWrite: true
+};
 var pendingSsid = null;
 var pendingSecure = false;
 
@@ -275,6 +282,10 @@ function loadConfig() {
   return fetchJSON('/api/config').then(function (cfg) {
     state.device_name = cfg.device_name || '';
     state.timezone_minutes = cfg.timezone_minutes || 0;
+    state.city = cfg.city || '';
+    state.city_resolved = cfg.city_resolved || '';
+    state.city_lat = cfg.city_lat || 0;
+    state.city_lon = cfg.city_lon || 0;
     // can_write — решает устройство по интерфейсу, с которого пришёл этот
     // самый запрос (docs/decisions.md, п.8): страница не гадает по другим
     // признакам, а просто верит ответу.
@@ -293,6 +304,18 @@ function loadConfig() {
       };
     });
     el('device-name').value = state.device_name;
+    el('device-city').value = state.city;
+    // Координаты определяются геокодингом на самом устройстве при первом
+    // выходе в сеть (docs/constructor.md, «Тонкость») — пока city не
+    // совпадает с city_resolved, честно пишем, что ждать, а не показываем
+    // 0.0000 как будто это настоящие координаты.
+    if (state.city && state.city !== state.city_resolved) {
+      el('city-hint').textContent = 'координаты определятся при подключении к сети';
+    } else if (state.city_lat || state.city_lon) {
+      el('city-hint').textContent = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
+    } else {
+      el('city-hint').textContent = '';
+    }
     renderNetworks();
     renderConnectors();
   }).catch(function (e) {
@@ -541,6 +564,7 @@ function doSave() {
   var payload = {
     device_name: el('device-name').value || 'inkroam-setup',
     timezone_minutes: state.timezone_minutes,
+    city: el('device-city').value || 'Екатеринбург',
     networks: state.networks.map(function (n) { return { ssid: n.ssid, password: n.password || '' }; }),
     connectors: state.connectors.filter(function (c) { return c.id; }).map(function (c) {
       return {

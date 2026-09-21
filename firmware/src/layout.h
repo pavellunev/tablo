@@ -18,6 +18,11 @@
 //   mail.unread                    — number: всего непрочитанных в ящике
 //   mail.N.from / .subject / .time — text, N = 1..4 (последние письма в кадре)
 //   weather.temp                   — number: температура, °C
+//   weather.low/.high               — number: мин/макс за сутки; коннектор
+//                                      их заполняет, но draw_today их пока не
+//                                      рисует — эталон (cockpit.html) их не
+//                                      показывает, добавлять неутверждённое
+//                                      в кадр не стали (см. Status Log)
 //   weather.summary                — text: краткое описание погоды
 //   event.N.at / .title            — text, N = 1..3 (ближайшие события)
 //

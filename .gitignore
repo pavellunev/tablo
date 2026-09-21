@@ -9,3 +9,4 @@ __pycache__/
 # про сам шрифт — там источники осознанно оставлены, здесь другой случай).
 tools/render_frame/render_frame
 tools/render_frame/out/
+firmware/src/secrets.h

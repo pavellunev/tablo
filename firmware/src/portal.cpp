@@ -29,6 +29,23 @@ bool dns_active = false;
 // предупреждения. Поэтому только флаг, а сам restart — из portal::loop().
 std::atomic<bool> reboot_pending{false};
 
+// Последний снимок состояния слотов. Пишет главный цикл, читает задача
+// веб-сервера — отсюда мьютекс: копирование String под чужой записью даёт
+// рваную строку или чтение освобождённого буфера.
+String g_status_json = "{}";
+SemaphoreHandle_t g_status_lock = nullptr;
+
+void handle_status(AsyncWebServerRequest* request) {
+    String copy;
+    if (g_status_lock && xSemaphoreTake(g_status_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = g_status_json;
+        xSemaphoreGive(g_status_lock);
+    } else {
+        copy = "{\"error\":\"busy\"}";
+    }
+    request->send(200, "application/json", copy);
+}
+
 // Разрешение писать настройки проверяется по интерфейсу, с которого физически
 // пришло TCP-соединение, а не по netman::mode() — глобальному состоянию, которое
 // в момент прихода запроса может уже не совпадать с тем, через какую сеть он
@@ -154,7 +171,16 @@ void handle_not_found(AsyncWebServerRequest* request) {
 
 }  // namespace
 
+void set_status_json(const String& json) {
+    if (!g_status_lock) return;
+    if (xSemaphoreTake(g_status_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+        g_status_json = json;
+        xSemaphoreGive(g_status_lock);
+    }
+}
+
 void begin() {
+    g_status_lock = xSemaphoreCreateMutex();
     // Метку раздела передаём явно: LittleFS.begin() по умолчанию ищет раздел
     // с именем «spiffs», а у нас в partitions.csv он назван «littlefs» — без
     // этого файловая система не монтируется и страница настройки не
@@ -168,6 +194,7 @@ void begin() {
     });
     server.on("/api/scan", HTTP_GET, handle_scan);
     server.on("/api/config", HTTP_GET, handle_get_config);
+    server.on("/api/status", HTTP_GET, handle_status);
     server.on("/api/reboot", HTTP_POST, handle_reboot);
 
     // setMethod(HTTP_POST) явно: AsyncCallbackJsonWebHandler без него по

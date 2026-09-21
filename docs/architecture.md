@@ -41,18 +41,19 @@ struct Slot {
 ```jsonc
 {
   "id": "home",
-  "kind": "homeassistant",          // homeassistant | http | none
+  "kind": "homeassistant",          // homeassistant | http | anthropic | codex | imap | weather | geocode | none
   "url": "http://192.168.1.2:8123",
   "token": "…",                     // хранится в NVS, наружу не отдаётся
   "interval": 300,                  // как часто спрашивать, секунды
   "map": [
-    { "slot": "co2",  "entity": "sensor.abinetco2",       "ttl": 300 },
-    { "slot": "tvoc", "entity": "sensor.abinetairquality", "ttl": 300 }
+    { "slot": "co2",  "entity": "sensor.abinetco2",       "ttl": 300, "has_history": true },
+    { "slot": "tvoc", "entity": "sensor.abinetairquality", "ttl": 300, "has_history": true }
   ]
 }
 ```
 
-Для `kind: "http"` вместо `entity` — путь в JSON-ответе:
+Для `kind: "http"` вместо `entity` — путь в JSON-ответе, с необязательными
+дельтой и историей:
 
 ```jsonc
 {
@@ -61,18 +62,58 @@ struct Slot {
   "url": "https://api.example.com/rates",
   "interval": 300,
   "map": [
-    { "slot": "btc",     "path": "bitcoin.usd",     "ttl": 300 },
-    { "slot": "usd_rub", "path": "usd.rub",         "ttl": 900 }
+    { "slot": "btc",     "path": "bitcoin.usd", "ttl": 300, "delta_source": "changePercent" },
+    { "slot": "usd_rub", "path": "usd.rub",     "ttl": 900 }
   ]
 }
 ```
 
+`delta_source` — путь ко второму полю того же ответа: готовый процент
+изменения (как у Binance) или, при `delta_is_previous: true`, предыдущее
+значение того же показателя (как `Valute.USD.Previous` у ЦБ) — тогда дельта
+считается сама, `(value-previous)/previous*100`. `has_history: true` у
+мэппинга — это НЕ текущее значение, а массив точек истории для спарклайна
+(`history_source`/`history_item` — путь до массива и путь внутри каждого его
+элемента, как у `btc_history`/klines Binance или `/api/history/period` у
+Home Assistant): история приходит из настоящих данных источника, а не
+копится из редких опросов (см. Status Log про то, почему накопление внутри
+Store вводило в заблуждение).
+
+`kind: "anthropic"`/`"codex"` — фиксированные адреса (константы в
+connectors.cpp, не поле настроек, у них ровно один формат ответа): читают
+Bearer-токен из `token`, `anthropic` дополнительно обновляет его через
+`refresh_token` при 401 и сохраняет новую пару в NVS. Слот несёт ОСТАТОК
+лимита (`100 - utilization`), не использование — так просил владелец;
+`limit.claude.reset`/`limit.codex.reset` — текст со временем сброса,
+посчитанный из `resets_at`/`reset_at` в том же ответе. `403` у обоих — не
+«источник не ответил», а «недоступен из этой страны — нужен VPN»
+(`docs/decisions.md`, п.8а): причина отказа оседает в `Slot::error` через
+`Store::mark_failed(id, reason)` и попадает в `/api/status`.
+
+`kind: "imap"` — три команды текстового протокола (`LOGIN`/`SELECT
+INBOX`/`SEARCH UNSEEN`) поверх `WiFiClientSecure`, логин в `username`, пароль
+приложения в `token`, `url` хранит хост IMAP-сервера, плюс `FETCH` заголовков
+(`FROM`/`SUBJECT`/`DATE`) для последних до четырёх непрочитанных —
+заполняет `mail.N.from`/`.subject`/`.time`. Тема декодируется из MIME
+encoded-word (`=?UTF-8?B?…?=`/`=?UTF-8?Q?…?=` — Gmail кодирует почти всегда).
+
+`kind: "weather"` строит адрес Open-Meteo сам, из `Settings.city_lat`/
+`city_lon` (не из `url` — они меняются геокодингом, не формой), заполняет
+`weather.temp`/`.low`/`.high` тем же `map`, что и `http`, плюс
+`weather.summary` (код WMO → слово словарём `wmo_to_text`) и обновляет
+`Settings.timezone_minutes` из `utc_offset_seconds` того же ответа, если он
+изменился. `kind: "geocode"` молчит, пока `Settings.city_resolved ==
+Settings.city`; при расхождении (владелец сменил город на странице
+настройки) ищет координаты через `geocoding-api.open-meteo.com` и сохраняет
+их в NVS вместе с `city_resolved` — `docs/constructor.md`, «Город вместо
+координат и пояса».
+
 Коннекторы независимы: один отвалился — его слоты протухают, остальные живут.
 Никакой общей точки отказа.
 
-**Чего коннектор не делает.** Не ходит в OAuth, не разбирает почту, не хранит
-долгоживущих секретов сверх одного токена доступа. Всё это живёт на большой
-машине и приезжает сюда готовыми значениями — [почему](decisions.md#2).
+**Чего коннектор больше не избегает.** Раньше здесь стояло «не ходит в OAuth,
+не разбирает почту» — решение изменено, причина и цена записаны честно в
+[decisions.md, п.2](decisions.md#2-устройство-ходит-в-oauth-и-разбирает-почту-само).
 
 ## Раскладка
 
@@ -195,7 +236,7 @@ python3 tools/compare_frame.py tools/render_frame/out/full.png reference/cockpit
 | Что | Где | Почему |
 |---|---|---|
 | Сети Wi-Fi, токены | NVS | переживает перепрошивку, не лежит в файловой системе открытым текстом |
-| Описания коннекторов | NVS, одним JSON | меняется целиком, читается при старте |
+| Описания коннекторов | NVS, одним JSON (blob, не string) | меняется целиком, читается при старте; blob — потому что у строк в NVS жёсткий предел 4000 байт (`nvs_set_str`), а полный JSON с реальными OAuth-токенами и картой коннекторов уже вырос за него — см. Status Log |
 | Страница настройки | LittleFS | обычные файлы, заливаются отдельно от прошивки |
 | Слоты | ОЗУ | смысла переживать перезагрузку нет: источники опрашиваются заново |
 | Последний кадр | ОЗУ | после перезапуска рисуется заново — иначе свежая правка ждала бы на экране |

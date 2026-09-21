@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "../../firmware/src/canvas_mem.h"
 #include "../../firmware/src/layout.h"
@@ -48,19 +49,18 @@ void put_text(slots::Store& store, const char* id, const char* text, uint32_t ag
     store.put(id, s, connector);
 }
 
-// Несколько последовательных put() с разными числами — так же, как несколько
-// опросов коннектора подряд, только без сети. Store::put() сам копит историю
-// (slots.cpp) — этим сценарий и проверяет, что спарклайн рисует настоящий
-// накопленный ряд, а не выдуманную кривую. Точки идут от самой старой к самой
-// свежей, свежая — с возрастом age_seconds, как и put_number.
+// История для спарклайна — явным put_history(), как теперь и делают
+// коннекторы (btc_history/klines, HA /api/history/period): Store::put()
+// больше не копит её сам из повторных put() (см. Status Log — накопление из
+// пятиминутных опросов подписывало «ЗА 24 Ч» под сорока минутами реальных
+// данных). Последняя точка values — это ЕЩЁ НЕ текущее значение, текущее
+// задаётся отдельным put_number() с дельтой, как и раньше.
 void put_series(slots::Store& store, const char* id, std::initializer_list<float> values,
                 uint32_t age_seconds, uint32_t ttl, const char* connector) {
-    uint32_t step = 90;                              // минута-полторы между замерами
-    uint32_t oldest_age = static_cast<uint32_t>(age_seconds + step * (values.size() - 1));
-    for (float v : values) {
-        put_number(store, id, v, 0, oldest_age, ttl, connector);
-        oldest_age -= step;
-    }
+    (void)age_seconds;
+    (void)ttl;
+    std::vector<float> v(values);
+    store.put_history(id, v.data(), static_cast<uint8_t>(v.size()), connector);
 }
 
 // ── сценарий 1: все источники отвечают — все блоки на месте, верхний ряд
@@ -77,7 +77,7 @@ slots::Store build_full_scenario() {
 
     put_number(store, "limit.claude.5h", 42, 0, 30, 240, "limits");
     put_number(store, "limit.claude.week", 78, 0, 30, 240, "limits");
-    put_text(store, "limit.claude.reset", "сброс через 3:06 · 2 дн 22 ч", 30, 240, "limits");
+    put_text(store, "limit.claude.reset", "5 ч через 3:06 · неделя через 2 дн 22 ч", 30, 240, "limits");
     put_number(store, "limit.codex", 15, 0, 30, 240, "limits");
     put_text(store, "limit.codex.reset", "неделя · сброс 13:01 · через 2 дн 21 ч", 30, 240,
              "limits");
