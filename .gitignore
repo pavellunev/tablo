@@ -10,3 +10,6 @@ __pycache__/
 tools/render_frame/render_frame
 tools/render_frame/out/
 firmware/src/secrets.h
+
+# Рабочие планы и заметки оркестратора — не часть продукта
+.claude/

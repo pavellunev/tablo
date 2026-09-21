@@ -80,8 +80,7 @@ void required_slots(const Instance&, std::vector<String>& out);
    рядом с остальными плюс запись в `kRegistry[]`. `extern` на самом
    определении `Spec` в твоём файле обязателен — без него `const` на уровне
    namespace получает внутреннюю линковку по умолчанию в C++, и `registry.cpp`
-   не находит символ при раздельной компиляции (поймано на реальной сборке,
-   см. Status Log `.claude/plans/constructor.md`).
+   не находит символ при раздельной компиляции (поймано на реальной сборке).
 5. **Лёгкая таблица типов** (`widgets/types.cpp`, `kTypes[]`): добавь
    `{type, default_size, min_width}` — этим пользуется `config.cpp` при
    разборе дашборда с формы (проверка `type`/`size`), не тяня в себя код
