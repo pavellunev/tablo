@@ -2,7 +2,7 @@
 // подключения к точке доступа (docs/decisions.md, п.8). Само кодирование QR
 // (ricmoo/QRCode) не наш код и не тестируется юнит-тестами — его декодирует
 // внешний сканер по PNG из tools/render_frame (см. Status Log в
-// .claude/plans/inkroam.md).
+// .claude/plans/tablo.md).
 //
 // wifi_qr.cpp подключается исходником — тот же приём, что и в test_config/
 // test_slots (test_build_src не включён, см. их комментарий).
@@ -16,9 +16,9 @@ void setUp() {}
 void tearDown() {}
 
 static void test_payload_basic_format() {
-    String p = wifi_qr::payload("inkroam-setup", "23456789AB");
+    String p = wifi_qr::payload("tablo-setup", "23456789AB");
 
-    TEST_ASSERT_EQUAL_STRING("WIFI:T:WPA;S:inkroam-setup;P:23456789AB;;", p.c_str());
+    TEST_ASSERT_EQUAL_STRING("WIFI:T:WPA;S:tablo-setup;P:23456789AB;;", p.c_str());
 }
 
 // Точка с запятой в SSID — минимальный, но настоящий случай: без экранирования

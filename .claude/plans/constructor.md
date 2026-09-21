@@ -9,7 +9,7 @@
 
 ## Context
 
-Репозиторий `~/Development/inkroam`, прошивка `firmware/src`, тесты на хосте
+Репозиторий `~/Development/tablo`, прошивка `firmware/src`, тесты на хосте
 `firmware/test/*` (`pio test -e native`), сборка `pio run -e xiao-esp32s3`
 (`pio` в `~/Library/Python/3.13/bin`). DoD — `scripts/verify.sh`.
 
@@ -396,7 +396,7 @@ http://<имя>.local/ из той же сети».
 - 2026-09-21 — залито на устройство (прошивка + LittleFS). Живая проверка по
   сети: `/api/widgets` — 8 типов; `/api/config` — 3 дашборда, active=0,
   секретов в ответе нет; `/api/status` без `text`; страница 200; reboot без
-  JSON — 404; mDNS `inkroam-setup.local` резолвится (curl без `-4` ждёт 5 с
+  JSON — 404; mDNS `tablo-setup.local` резолвится (curl без `-4` ждёт 5 с
   IPv6-ответа, браузерам не мешает). Лог порта после перезагрузки: Claude —
   429 сразу, пауза по Retry-After 2302 с (окно у Anthropic растёт с каждым
   обращением: 340 → 2363 с; с Mac тем же токеном пробовать больше нельзя —
@@ -425,7 +425,7 @@ http://<имя>.local/ из той же сети».
   (margin 12/gap 12 против 15 и 19/17 в прошивке) расходятся в полосе
   20–40 px; `<id>.status` удалённого коннектора висит до перезагрузки.
 - 2026-09-22 — Claude: общая с CLI пара умерла (401 → refresh не прошёл);
-  владелец сделал отдельный вход `CLAUDE_CONFIG_DIR=~/.claude-inkroam claude
+  владелец сделал отдельный вход `CLAUDE_CONFIG_DIR=~/.claude-tablo claude
   auth login` — своя линия токенов для устройства, CLI больше не ротирует
   её. Новый токен с Mac даёт 200 (5 ч: 24 %, неделя: 60 %) — лимит 429 был
   привязан к мёртвому токену. При передаче пары через `/api/config` устройство

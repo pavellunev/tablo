@@ -22,7 +22,7 @@ namespace {
 // Один namespace, один ключ: вся конфигурация — одна JSON-строка. Отдельные
 // ключи на каждое поле не дают выигрыша (пишем и читаем всё равно целиком —
 // см. «один владелец» в шапке файла), а лишний код по их синхронизации не нужен.
-constexpr const char* kNamespace = "inkroam";
+constexpr const char* kNamespace = "tablo";
 // Два ключа — намеренно. Раньше настройки лежали строкой под «settings»;
 // blob под тем же ключом NVS не примет: тип записи не совпадает, nvs_set_blob
 // отвечает TYPE_MISMATCH, и save() возвращал false — на уже настроенном
@@ -35,7 +35,7 @@ constexpr const char* kKey = "settings_b";         // blob
 
 Settings defaults() {
     Settings s;
-    s.device_name = "inkroam-setup";
+    s.device_name = "tablo-setup";
     // Домашняя сеть — заводская, из secrets.h: после перепрошивки или сброса
     // устройство подключается само, а не ждёт настройки с телефона. Пустой
     // SSID в secrets — сети нет, поднимется точка доступа как раньше.

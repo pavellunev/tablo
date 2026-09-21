@@ -130,7 +130,7 @@ void redraw() {
     device.battery_pct = battery::percent();
     // now_seconds() — время работы устройства (millis()/1000), не настоящее
     // unix-время: синхронизации часов (NTP) в проекте пока нет — вне рамок
-    // фазы 3, см. Status Log в .claude/plans/inkroam.md. Свежесть слотов
+    // фазы 3, см. Status Log в .claude/plans/tablo.md. Свежесть слотов
     // (Slot::fresh/stale) от этого не страдает — там сравниваются между собой
     // значения одних и тех же часов, — а вот дата и часы в шапке кадра будут
     // отсчитываться от 1 января 1970 года, а не от реальной даты, пока NTP не
@@ -156,7 +156,7 @@ void redraw() {
 void setup() {
     Serial.begin(115200);
     delay(300);  // USB CDC поднимается не мгновенно; иначе первые строки пропадают
-    Serial.println("inkroam: старт");
+    Serial.println("tablo: старт");
 
     display::begin();
     display::show_boot_screen();
@@ -166,7 +166,7 @@ void setup() {
     netman::begin(config::load());
     portal::begin();
 
-    Serial.printf("inkroam: сеть — %s\n", netman::status_text().c_str());
+    Serial.printf("tablo: сеть — %s\n", netman::status_text().c_str());
 }
 
 void loop() {

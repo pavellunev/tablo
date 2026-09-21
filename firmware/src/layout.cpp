@@ -2,7 +2,7 @@
 // — не оценка на глаз, а обмер эталона тем же способом, каким его потом
 // проверяет tools/compare_frame.py (самый длинный сплошной пробег тёмных
 // пикселей в строке/столбце — линия, текст такого пробега не даёт). Подробный
-// разбор — Status Log в .claude/plans/inkroam.md.
+// разбор — Status Log в .claude/plans/tablo.md.
 //
 // Отрисовка конкретных блоков (Рынки, Лимиты, Воздух, Почта, Сегодня, …)
 // переехала в widgets/w_*.cpp — единый протокол виджета (widgets/widget.h,
@@ -480,7 +480,7 @@ void draw_boot(Canvas& canvas, const char* status) {
     // Имя — Terminus24 при scale=2, как пароль точки доступа: у PlexMono букв
     // нет (только цифры и знаки), а второго крупного шрифта с латиницей мы
     // намеренно не заводили (font.h).
-    const char* name = "inkroam";
+    const char* name = "tablo";
     const int16_t name_w = static_cast<int16_t>(text_width(fonts::Terminus24, name) * 2);
     draw_text(canvas, fonts::Terminus24, static_cast<int16_t>(cx - name_w / 2), 228, name,
               Color::Black, 2, /*bold=*/true);
@@ -507,7 +507,7 @@ void draw_boot(Canvas& canvas, const char* status) {
 void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& password) {
     canvas.fill(Color::White);
 
-    draw_text(canvas, fonts::Terminus24, MARGIN, AP_TITLE_Y, "НАСТРОЙКА INKROAM", Color::Black, 1,
+    draw_text(canvas, fonts::Terminus24, MARGIN, AP_TITLE_Y, "НАСТРОЙКА TABLO", Color::Black, 1,
               /*bold=*/true);
     canvas.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(canvas.width() - 2 * MARGIN), 2,
                      Color::Black);

@@ -32,7 +32,7 @@
 // layout_row ниже). Заводской «Стол» воспроизводит дословно
 // trmnl-ink/renderer/app/templates/cockpit.html (эталон:
 // reference/cockpit-reference.png, обмеры — Status Log в
-// .claude/plans/inkroam.md): верхний ряд — Рынки (M, 296px) слева и гибкая
+// .claude/plans/tablo.md): верхний ряд — Рынки (M, 296px) слева и гибкая
 // колонка Лимиты+Воздух справа, нижний — гибкая Почта слева и Сегодня (S,
 // 202px) справа. Виджет без единого видимого слота не резервирует место —
 // соседи по ряду делят освободившееся пространство (docs/widgets.md).
@@ -94,7 +94,7 @@ struct Civil {
 
 // Unix-время + смещение в минутах -> календарь. Правильно только сама
 // арифметика; синхронизация часов (NTP) в проект пока не встроена — см.
-// Status Log в .claude/plans/inkroam.md, что именно это значит на устройстве.
+// Status Log в .claude/plans/tablo.md, что именно это значит на устройстве.
 Civil to_civil(uint32_t unix_time, int16_t timezone_minutes);
 
 // nullptr или Slot::empty() — трактуются одинаково: показывать нечего.

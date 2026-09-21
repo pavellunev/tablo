@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/verify.sh — DoD для inkroam. Тонкий wrapper над общим
+# scripts/verify.sh — DoD для tablo. Тонкий wrapper над общим
 # ~/.claude/templates/verify-core.sh: отдельного профиля PlatformIO в core
 # нет, поэтому сборка/тесты PlatformIO подставлены как PY_BUILD/PY_TEST —
 # тот же приём, что в trmnl-ink/scripts/verify.sh для esphome.

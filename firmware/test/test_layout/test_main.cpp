@@ -2,7 +2,7 @@
 // отсутствии части из них, форматирование значений. Рисование (draw_frame и
 // widgets::w_*.cpp::*_draw) не тестируется юнит-тестами: у него нет
 // числового результата, который стоило бы сверять построчно — сверка глазами
-// через tools/render_frame/build_and_run.sh (см. .claude/plans/inkroam.md).
+// через tools/render_frame/build_and_run.sh (см. .claude/plans/tablo.md).
 //
 // layout.cpp подключается исходником по тому же приёму, что и slots.cpp/
 // connectors.cpp в test_slots — test_build_src не включён, см. их комментарий.
@@ -536,7 +536,7 @@ static void test_compute_two_rows_both_present_split_body() {
     TEST_ASSERT_EQUAL(body.h, r1.h + 16 + r2.h);
     // Пропорция — не круглое число «пополам», а обмер эталона (235px верхний
     // ряд / 154px нижний на теле кадра 390px без зазора — Status Log в
-    // .claude/plans/inkroam.md). Число фиксирует именно эту пропорцию
+    // .claude/plans/tablo.md). Число фиксирует именно эту пропорцию
     // (~60/40), а не только «оба > 0», иначе её смена осталась бы незамеченной.
     TEST_ASSERT_EQUAL(110, r1.h);  // (200-16)*0.603, целочисленно
     TEST_ASSERT_EQUAL(74, r2.h);

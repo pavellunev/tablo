@@ -104,12 +104,12 @@ static void test_from_json_zero_interval_is_clamped() {
 
 static void test_from_json_missing_device_name_keeps_previous() {
     config::Settings settings;
-    settings.device_name = "my-inkroam";
+    settings.device_name = "my-tablo";
 
     String payload = "{}";
     config::from_json(payload, settings);
 
-    TEST_ASSERT_EQUAL_STRING("my-inkroam", settings.device_name.c_str());
+    TEST_ASSERT_EQUAL_STRING("my-tablo", settings.device_name.c_str());
 }
 
 // ── to_json/from_json: секреты и map переживают полный цикл ──

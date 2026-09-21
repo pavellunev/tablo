@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>inkroam — настройка</title>
+<title>tablo — настройка</title>
 <style>
   :root {
     color-scheme: light;
@@ -233,7 +233,7 @@
 </head>
 <body>
 <header>
-  <h1>inkroam</h1>
+  <h1>tablo</h1>
   <p>настройка устройства</p>
 </header>
 
@@ -273,7 +273,7 @@
   <section id="device-section">
     <h2>Устройство</h2>
     <label>Имя устройства
-      <input id="device-name" type="text" placeholder="inkroam-setup">
+      <input id="device-name" type="text" placeholder="tablo-setup">
     </label>
     <p class="empty" id="device-name-hint"></p>
   </section>
@@ -497,7 +497,7 @@ function updateCityHint() {
 function updateDeviceNameHint(name) {
   var hintEl = document.getElementById('device-name-hint');
   if (!hintEl) return;
-  hintEl.textContent = 'страница доступна как http://' + (name || 'inkroam-setup') + '.local/ из той же сети';
+  hintEl.textContent = 'страница доступна как http://' + (name || 'tablo-setup') + '.local/ из той же сети';
 }
 
 // ── Экраны: токены размеров, каталог виджетов, дашборды ──
@@ -1329,7 +1329,7 @@ function save() {
     return;
   }
   var payload = {
-    device_name: el('device-name').value || 'inkroam-setup',
+    device_name: el('device-name').value || 'tablo-setup',
     timezone_minutes: state.timezone_minutes,
     city: state.city || 'Екатеринбург',
     networks: state.networks.map(function (n) { return { ssid: n.ssid, password: n.password || '' }; }),

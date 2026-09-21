@@ -101,7 +101,7 @@ slots::Store build_full_scenario() {
     put_text(store, "mail.1.subject", "Батарея датчика воздуха разряжена", 60, 900, "mail");
     put_text(store, "mail.1.time", "14:32", 60, 900, "mail");
     put_text(store, "mail.2.from", "GitHub", 60, 900, "mail");
-    put_text(store, "mail.2.subject", "[inkroam] CI passed", 60, 900, "mail");
+    put_text(store, "mail.2.subject", "[tablo] CI passed", 60, 900, "mail");
     put_text(store, "mail.2.time", "12:05", 60, 900, "mail");
     put_text(store, "mail.3.from", "Аэрофлот", 60, 900, "mail");
     put_text(store, "mail.3.subject", "Регистрация на рейс открыта, посадочный внутри", 60, 900,
@@ -111,7 +111,7 @@ slots::Store build_full_scenario() {
     put_number(store, "weather.temp", -2, 0, 300, 3600, "today");
     put_text(store, "weather.summary", "-4…+1 · ОБЛАЧНО", 300, 3600, "today");
     put_text(store, "event.1.at", "10:00", 300, 3600, "today");
-    put_text(store, "event.1.title", "Синк по inkroam с самим собой", 300, 3600, "today");
+    put_text(store, "event.1.title", "Синк по tablo с самим собой", 300, 3600, "today");
     put_text(store, "event.2.at", "18:30", 300, 3600, "today");
     put_text(store, "event.2.title", "Забрать посылку", 300, 3600, "today");
 
@@ -158,7 +158,7 @@ bool render(const slots::Store& store, const layout::DeviceInfo& device, const s
 // Кадр точки доступа (docs/decisions.md, п.8) — отдельный сценарий: своя
 // раскладка (layout::draw_ap_credentials), не draw_frame. ssid/password —
 // не выдумка, а то же самое значение, которое проверяется распознаванием QR
-// со снятого PNG (см. Status Log в .claude/plans/inkroam.md): если тут и в
+// со снятого PNG (см. Status Log в .claude/plans/tablo.md): если тут и в
 // проверке разойдётся строка — расхождение сразу увидит тот, кто это читает.
 bool render_boot(const std::string& path) {
     canvas::CanvasMemory canvas(800, 480);
@@ -183,7 +183,7 @@ slots::Store build_failures_scenario() {
 
 bool render_ap_credentials(const std::string& path) {
     canvas::CanvasMemory canvas(800, 480);
-    layout::draw_ap_credentials(canvas, "inkroam-setup", "23456789AB");
+    layout::draw_ap_credentials(canvas, "tablo-setup", "23456789AB");
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
     return ok;

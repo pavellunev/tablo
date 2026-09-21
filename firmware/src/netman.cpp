@@ -144,7 +144,7 @@ std::vector<ScanResult> scan_locked() {
 }
 
 void start_access_point(const config::Settings& settings) {
-    String name = settings.device_name.isEmpty() ? "inkroam-setup" : settings.device_name;
+    String name = settings.device_name.isEmpty() ? "tablo-setup" : settings.device_name;
 
     // Пароль постоянный — сгенерирован один раз в config::load() и живёт в
     // NVS (docs/decisions.md, п.8): вводить новый при каждом подъёме точки
@@ -185,7 +185,7 @@ void start_access_point(const config::Settings& settings) {
 // новый IP, а mDNS-запись нужно переобъявлять тоже — сам MDNS.begin() не
 // умеет "обновить IP" по требованию, только полную переинициализацию.
 void announce_mdns(const config::Settings& settings) {
-    String name = settings.device_name.isEmpty() ? "inkroam-setup" : settings.device_name;
+    String name = settings.device_name.isEmpty() ? "tablo-setup" : settings.device_name;
     // MDNS.begin() на уже поднятом стеке падает в mdns_init() с
     // ESP_ERR_INVALID_STATE до установки имени — без end() второй вход в
     // станцию (и смена имени на странице) оставлял бы старую запись.
