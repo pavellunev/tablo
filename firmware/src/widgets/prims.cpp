@@ -351,6 +351,26 @@ int16_t draw_limit_error_row(Canvas& c, Rect r, int16_t cursor, const char* titl
     return static_cast<int16_t>(title_baseline + 13 + 14);
 }
 
+const char* failure_reason(const Store& store, const char* const* status_slots) {
+    if (status_slots == nullptr) return nullptr;
+    for (const char* const* p = status_slots; *p != nullptr; ++p) {
+        const char* reason = limits_error_text(store, *p, /*has_data=*/false);
+        if (reason != nullptr) return reason;
+    }
+    return nullptr;
+}
+
+void draw_reason_block(Canvas& c, Rect r, const char* eyebrow, const char* reason) {
+    // По контракту сюда приходят только с причиной (visible() без неё не
+    // пускает), но nullptr в truncate_to_width — падение всего кадра, а не
+    // одного блока; страхуемся текстом, а не молчанием.
+    if (reason == nullptr) reason = "нет данных";
+    draw_eyebrow(c, r, eyebrow);
+    const int16_t baseline = static_cast<int16_t>(r.y + kEyebrowTextOffset + 30);
+    String fitted = truncate_to_width(fonts::Terminus14, reason, r.w);
+    draw_text(c, fonts::Terminus14, r.x, baseline, fitted.c_str(), Color::Black);
+}
+
 bool has_failure_reason(const Store& store, const char* status_slot) {
     return limits_error_text(store, status_slot, /*has_data=*/false) != nullptr;
 }
@@ -376,6 +396,10 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
     bool has_co2 = layout::has_data(co2);
     bool has_tvoc = layout::has_data(tvoc);
     bool has_air = show_air && (has_co2 || has_tvoc);
+    // Датчики дома отвалились (HA недоступен, токен протух) — рубрика воздуха
+    // остаётся с причиной вместо шкал, тем же правилом, что лимиты выше.
+    static const char* const kHomeStatus[] = {"home.status", nullptr};
+    const char* air_error = (show_air && !has_air) ? failure_reason(store, kHomeStatus) : nullptr;
 
     // Эйброу текущей рубрики садится туда, куда довёл курсор y — если ЛИМИТЫ
     // отсутствуют вовсе, КАБИНЕТ·ВОЗДУХ окажется в самом верху колонки, ровно
@@ -438,7 +462,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             cursor = static_cast<int16_t>(bar_y + 14);
         }
 
-        if (has_air) {
+        if (has_air || air_error) {
             int16_t hair_y = static_cast<int16_t>(cursor + 15);
             c.hline(r.x, hair_y, r.w, Color::Black);
             y = static_cast<int16_t>(hair_y + 10);  // -> следующий эйброу
@@ -447,7 +471,10 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
         }
     }
 
-    if (has_air) {
+    if (air_error) {
+        draw_reason_block(c, Rect{r.x, y, r.w, static_cast<int16_t>(r.y + r.h - y)},
+                          "КАБИНЕТ · ВОЗДУХ", air_error);
+    } else if (has_air) {
         draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "КАБИНЕТ · ВОЗДУХ");
         // 26, не 20: у PlexMono28 (значение CO₂/TVOC) выносные части поднимают
         // верхний край чернил заметно выше базовой линии, чем у прежнего

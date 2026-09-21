@@ -457,6 +457,53 @@ constexpr int16_t AP_QR_GAP = 30;
 
 }  // namespace
 
+void draw_boot(Canvas& canvas, const char* status) {
+    canvas.fill(Color::White);
+    const int16_t cx = static_cast<int16_t>(canvas.width() / 2);
+
+    // Угловые метки — тот же 2px штрих, что у линий кадра: экран включения
+    // должен выглядеть частью того же прибора, а не заставкой другой программы.
+    constexpr int16_t kTick = 24;
+    const int16_t right = static_cast<int16_t>(canvas.width() - MARGIN);
+    const int16_t bottom = static_cast<int16_t>(canvas.height() - MARGIN);
+    canvas.fill_rect(MARGIN, MARGIN, kTick, 2, Color::Black);
+    canvas.fill_rect(MARGIN, MARGIN, 2, kTick, Color::Black);
+    canvas.fill_rect(static_cast<int16_t>(right - kTick), MARGIN, kTick, 2, Color::Black);
+    canvas.fill_rect(static_cast<int16_t>(right - 2), MARGIN, 2, kTick, Color::Black);
+    canvas.fill_rect(MARGIN, static_cast<int16_t>(bottom - 2), kTick, 2, Color::Black);
+    canvas.fill_rect(MARGIN, static_cast<int16_t>(bottom - kTick), 2, kTick, Color::Black);
+    canvas.fill_rect(static_cast<int16_t>(right - kTick), static_cast<int16_t>(bottom - 2), kTick, 2,
+                     Color::Black);
+    canvas.fill_rect(static_cast<int16_t>(right - 2), static_cast<int16_t>(bottom - kTick), 2, kTick,
+                     Color::Black);
+
+    // Имя — Terminus24 при scale=2, как пароль точки доступа: у PlexMono букв
+    // нет (только цифры и знаки), а второго крупного шрифта с латиницей мы
+    // намеренно не заводили (font.h).
+    const char* name = "inkroam";
+    const int16_t name_w = static_cast<int16_t>(text_width(fonts::Terminus24, name) * 2);
+    draw_text(canvas, fonts::Terminus24, static_cast<int16_t>(cx - name_w / 2), 228, name,
+              Color::Black, 2, /*bold=*/true);
+
+    // Короткая линия под именем — как правило под шапкой кадра, но по ширине
+    // слова, не экрана: это подпись к имени, а не разделитель рядов.
+    canvas.fill_rect(static_cast<int16_t>(cx - name_w / 2), 246, name_w, 2, Color::Black);
+
+    const char* tagline = "АВТОНОМНЫЙ E-INK ДАШБОРД";
+    const int16_t tag_w = text_width(fonts::Terminus14, tagline);
+    draw_text(canvas, fonts::Terminus14, static_cast<int16_t>(cx - tag_w / 2), 276, tagline,
+              Color::Black, 1, /*bold=*/true);
+
+    // Состояние — внизу слева, где в рабочем кадре стоит почта: глаз уже
+    // приучен искать «что сейчас происходит» там.
+    draw_text(canvas, fonts::Terminus14, static_cast<int16_t>(MARGIN + 12),
+              static_cast<int16_t>(bottom - 12), status, Color::Black, 1, false);
+    const char* hw = "TRMNL 7.5\" · XIAO ESP32-S3";
+    const int16_t hw_w = text_width(fonts::Terminus14, hw);
+    draw_text(canvas, fonts::Terminus14, static_cast<int16_t>(right - 12 - hw_w),
+              static_cast<int16_t>(bottom - 12), hw, Color::Black, 1, false);
+}
+
 void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& password) {
     canvas.fill(Color::White);
 

@@ -27,13 +27,34 @@ using slots::Store;
 // что почта нужна (connectors::provides матчит по префиксу "mail.").
 const char* const kMailSlots[] = {"mail.unread", nullptr};
 
+const char* const kMailStatus[] = {"mail.status", nullptr};
+
 bool mail_visible(const Store& store, const Instance&) {
-    return layout::has_data(store.find("mail.unread"));
+    return layout::has_data(store.find("mail.unread")) ||
+           prims::failure_reason(store, kMailStatus) != nullptr;
 }
+
+// Правый край колонки времени — с отступом от разделителя Почта|Сегодня:
+// в эталоне между текстом времени и вертикальной линией 20 px, у нас без
+// отступа выходило 3 — дата на живой панели упиралась в линию (фото
+// владельца, 2026-09-22). Замер: tools/compare_frame и PIL по
+// reference/cockpit-reference.png (x=547 против линии x=567).
+constexpr int16_t kTimeRightInset = 18;
 
 void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const Instance&) {
     int16_t header_baseline = static_cast<int16_t>(r.y + 12);
     int16_t plate_w = prims::draw_inverse_label(c, r.x, header_baseline, "ПОЧТА");
+
+    const char* reason = layout::has_data(store.find("mail.unread"))
+                             ? nullptr
+                             : prims::failure_reason(store, kMailStatus);
+    if (reason != nullptr) {
+        // Данных нет, причина есть — строка причины на месте первого письма.
+        String fitted = prims::truncate_to_width(fonts::Terminus14, reason, r.w);
+        draw_text(c, fonts::Terminus14, r.x, static_cast<int16_t>(r.y + 45), fitted.c_str(),
+                  Color::Black);
+        return;
+    }
 
     const Slot* unread = store.find("mail.unread");
     char summary[32];
@@ -72,7 +93,7 @@ void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const I
             draw_text(c, fonts::Terminus14, text_x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
         }
         if (layout::has_data(subject)) {
-            int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - kTimeReserve);
+            int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - kTimeReserve - kTimeRightInset);
             String label =
                 prims::truncate_to_width(fonts::Terminus14, subject->text.c_str(), subject_w);
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + kSubjectX), y,
@@ -81,8 +102,8 @@ void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const I
         const Slot* at = store.find(String(time_id));
         if (layout::has_data(at)) {
             int16_t tw = text_width(fonts::Terminus14, at->text.c_str());
-            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - tw), y,
-                      at->text.c_str(), Color::Black, 1, /*bold=*/true);
+            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - kTimeRightInset - tw),
+                      y, at->text.c_str(), Color::Black, 1, /*bold=*/true);
         }
         c.hline(r.x, static_cast<int16_t>(y + kSeparatorGap), r.w, Color::Black);
         y = static_cast<int16_t>(y + kRowHeight);

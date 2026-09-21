@@ -30,12 +30,22 @@ using slots::Store;
 // коллизии бы не было.
 const char* const kMarketsSlots[] = {"btc", "usd_rub", "eur_rub", nullptr};
 
-bool markets_visible(const Store& store, const Instance&) {
+const char* const kMarketsStatus[] = {"btc.status", "fiat.status", "btc_history.status", nullptr};
+
+bool markets_has_data(const Store& store) {
     return layout::has_data(store.find("btc")) || layout::has_data(store.find("usd_rub")) ||
            layout::has_data(store.find("eur_rub"));
 }
 
+bool markets_visible(const Store& store, const Instance&) {
+    return markets_has_data(store) || prims::failure_reason(store, kMarketsStatus) != nullptr;
+}
+
 void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const Instance&) {
+    if (!markets_has_data(store)) {
+        prims::draw_reason_block(c, r, "РЫНКИ", prims::failure_reason(store, kMarketsStatus));
+        return;
+    }
     prims::draw_eyebrow(c, r, "РЫНКИ");
     int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset);  // базовая линия эйброу
 

@@ -46,47 +46,13 @@ void begin() {
 }
 
 void show_boot_screen() {
+    // Полное обновление: это первый кадр после включения, панель могла хранить
+    // остаточное изображение прошлого сеанса — полный цикл его снимает.
     epd.setFullWindow();
+    canvas::CanvasGxEPD2<Panel> canvas(epd);
     epd.firstPage();
     do {
-        epd.fillScreen(GxEPD_WHITE);
-
-        // рамка по всему периметру экрана — проверяем, что драйвер не обрезает
-        // крайние пиксели буфера при 800×480.
-        epd.drawRect(0, 0, board::SCREEN_WIDTH, board::SCREEN_HEIGHT, GxEPD_BLACK);
-
-        // встроенный растровый шрифт Adafruit_GFX кириллицу не содержит (в его
-        // битмапах нет глифов за пределами ASCII) — полноценный Terminus с
-        // кириллицей подключаем в фазе 3, здесь кегли проверяем на латинице.
-        epd.setTextColor(GxEPD_BLACK);
-
-        epd.setTextSize(1);
-        epd.setCursor(20, 40);
-        epd.print("inkroam - phase 0 boot screen");
-
-        epd.setTextSize(2);
-        epd.setCursor(20, 70);
-        epd.print("GxEPD2_750_T7 800x480");
-
-        epd.setTextSize(3);
-        epd.setCursor(20, 110);
-        epd.print("size 3x");
-
-        epd.setTextSize(4);
-        epd.setCursor(20, 150);
-        epd.print("size 4x");
-
-        // горизонтальные линии — проверка прямых без сглаживания на e-ink.
-        for (int16_t y = 210; y <= 250; y += 10) {
-            epd.drawFastHLine(20, y, board::SCREEN_WIDTH - 40, GxEPD_BLACK);
-        }
-
-        // залитый прямоугольник — проверка сплошной заливки без артефактов.
-        epd.fillRect(20, 270, 200, 100, GxEPD_BLACK);
-
-        epd.setTextSize(1);
-        epd.setCursor(20, board::SCREEN_HEIGHT - 30);
-        epd.print("full refresh, no partial yet");
+        layout::draw_boot(canvas, "включение · ищем сохранённую сеть…");
     } while (epd.nextPage());
 }
 

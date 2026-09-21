@@ -28,12 +28,22 @@ const char* const kTodaySlots[] = {
     nullptr,
 };
 
-bool today_visible(const Store& store, const Instance&) {
+const char* const kTodayStatus[] = {"weather.status", "geocode.status", nullptr};
+
+bool today_has_data(const Store& store) {
     return layout::has_data(store.find("weather.temp")) ||
            layout::has_data(store.find("event.1.title"));
 }
 
+bool today_visible(const Store& store, const Instance&) {
+    return today_has_data(store) || prims::failure_reason(store, kTodayStatus) != nullptr;
+}
+
 void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const Instance&) {
+    if (!today_has_data(store)) {
+        prims::draw_reason_block(c, r, "СЕГОДНЯ", prims::failure_reason(store, kTodayStatus));
+        return;
+    }
     prims::draw_eyebrow(c, r, "СЕГОДНЯ");
     int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 34);
 

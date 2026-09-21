@@ -165,6 +165,11 @@ void draw_frame(canvas::Canvas& canvas, const slots::Store& store, const DeviceI
 // — и рядом QR формата WIFI: для подключения наведением камеры. Через тот же
 // Canvas, что и draw_frame, — тогда кадр снимается тем же хостовым
 // инструментом (tools/render_frame), а не только на живой панели.
+// Экран включения: имя устройства крупно, подпись и строка состояния —
+// вместо тестового узора фазы 0. Тем же Canvas, что и остальные кадры, —
+// снимается tools/render_frame (boot.png).
+void draw_boot(canvas::Canvas& canvas, const char* status);
+
 void draw_ap_credentials(canvas::Canvas& canvas, const String& ssid, const String& password);
 
 }  // namespace layout

@@ -19,7 +19,8 @@ using slots::Store;
 const char* const kAirSlots[] = {"co2", "tvoc", nullptr};
 
 bool air_visible(const Store& store, const Instance&) {
-    return layout::has_data(store.find("co2")) || layout::has_data(store.find("tvoc"));
+    return layout::has_data(store.find("co2")) || layout::has_data(store.find("tvoc")) ||
+           prims::has_failure_reason(store, "home.status");  // причина рисуется в draw_limits_and_air
 }
 
 void air_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const Instance&) {

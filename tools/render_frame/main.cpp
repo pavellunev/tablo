@@ -160,6 +160,27 @@ bool render(const slots::Store& store, const layout::DeviceInfo& device, const s
 // не выдумка, а то же самое значение, которое проверяется распознаванием QR
 // со снятого PNG (см. Status Log в .claude/plans/inkroam.md): если тут и в
 // проверке разойдётся строка — расхождение сразу увидит тот, кто это читает.
+bool render_boot(const std::string& path) {
+    canvas::CanvasMemory canvas(800, 480);
+    layout::draw_boot(canvas, "включение · ищем сохранённую сеть…");
+    bool ok = canvas.save_png(path);
+    std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
+    return ok;
+}
+
+// ── сценарий 4: все источники отвалились с причиной — ни один блок не
+// исчезает, каждый объясняет (правило владельца, 2026-09-22).
+slots::Store build_failures_scenario() {
+    slots::Store store;
+    store.mark_failed(String("btc"), String("источник не ответил (код 503)"));
+    store.mark_failed(String("home"), String("Home Assistant не отвечает"));
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    store.mark_failed(String("codex"), String("токен протух — обновите на странице настройки"));
+    store.mark_failed(String("mail"), String("imap: LOGIN отвергнут — проверьте пароль приложения"));
+    store.mark_failed(String("weather"), String("источник не ответил"));
+    return store;
+}
+
 bool render_ap_credentials(const std::string& path) {
     canvas::CanvasMemory canvas(800, 480);
     layout::draw_ap_credentials(canvas, "inkroam-setup", "23456789AB");
@@ -193,6 +214,8 @@ int main(int argc, char** argv) {
     ok &= render(build_degraded_scenario(), device, out_dir + "/degraded.png", defaults.dashboards[0]);
     ok &= render(build_empty_scenario(), device, out_dir + "/empty.png", defaults.dashboards[0]);
     ok &= render_ap_credentials(out_dir + "/ap_credentials.png");
+    ok &= render_boot(out_dir + "/boot.png");
+    ok &= render(build_failures_scenario(), device, out_dir + "/failures.png", defaults.dashboards[0]);
 
     // Три заводских дашборда, сценарий «все источники отвечают» — тот же
     // build_full_scenario(), меняется только то, какие виджеты в дашборде.

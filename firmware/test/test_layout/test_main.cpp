@@ -253,6 +253,67 @@ static void test_limits_error_row_renders_reason_text() {
     TEST_ASSERT_TRUE(dark > 200);
 }
 
+static void test_widgets_visible_by_failure_reason() {
+    // Все базовые блоки данных: отказ с причиной держит блок на экране.
+    struct Case { const char* widget; const char* connector; };
+    const Case cases[] = {{"mail", "mail"}, {"markets", "fiat"}, {"today", "weather"}, {"air", "home"}};
+    for (const Case& k : cases) {
+        Store store;
+        TEST_ASSERT_FALSE_MESSAGE(widget_visible(k.widget, store), k.widget);
+        store.mark_failed(String(k.connector), String("источник не ответил"));
+        TEST_ASSERT_TRUE_MESSAGE(widget_visible(k.widget, store), k.widget);
+    }
+}
+
+static int count_dark(const canvas::CanvasMemory& cv, int x0, int y0, int x1, int y1) {
+    int dark = 0;
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x)
+            if (cv.at(static_cast<int16_t>(x), static_cast<int16_t>(y))) ++dark;
+    return dark;
+}
+
+static void test_reason_blocks_render_text() {
+    const char* widgets_with_reason[][2] = {{"mail", "mail"}, {"markets", "btc"}, {"today", "geocode"}, {"air", "home"}};
+    for (auto& k : widgets_with_reason) {
+        Store store;
+        store.mark_failed(String(k[1]), String("источник не ответил (код 503)"));
+        canvas::CanvasMemory cv(800, 480);
+        cv.fill(canvas::Color::White);
+        widgets::Instance inst;
+        inst.type = k[0];
+        widgets::find(k[0])->draw(cv, store, DeviceInfo{}, Rect{15, 60, 400, 200}, inst);
+        TEST_ASSERT_TRUE_MESSAGE(count_dark(cv, 15, 60, 415, 160) > 200, k[0]);
+    }
+}
+
+static void test_mail_time_keeps_inset_from_right_edge() {
+    // Эталон: между временем письма и разделителем 20 px; без отступа было 3.
+    Store store;
+    Slot u; u.ok = true; u.at = 100; u.ttl = 60; u.number = 1;
+    store.put("mail.unread", u, "mail");
+    Slot t; t.ok = true; t.at = 100; t.ttl = 60; t.text = "22.09";
+    store.put("mail.1.from", t, "mail");
+    store.put("mail.1.time", t, "mail");
+    canvas::CanvasMemory cv(800, 480);
+    cv.fill(canvas::Color::White);
+    widgets::Instance inst; inst.type = "mail";
+    const Rect r{15, 300, 500, 150};
+    widgets::find("mail")->draw(cv, store, DeviceInfo{}, r, inst);
+    // Полоса первой строки (базовая линия r.y+45): правее r.x+r.w-15 текста нет,
+    // разделитель под строкой — ниже полосы и в подсчёт не входит.
+    TEST_ASSERT_EQUAL(0, count_dark(cv, r.x + r.w - 15, 330, r.x + r.w, 350));
+    // …а сам текст времени есть — чуть левее отступа.
+    TEST_ASSERT_TRUE(count_dark(cv, r.x + r.w - 60, 330, r.x + r.w - 15, 350) > 20);
+}
+
+static void test_boot_screen_renders() {
+    canvas::CanvasMemory cv(800, 480);
+    layout::draw_boot(cv, "включение");
+    TEST_ASSERT_TRUE(count_dark(cv, 200, 180, 600, 300) > 500);   // имя и подпись
+    TEST_ASSERT_TRUE(count_dark(cv, 15, 440, 400, 470) > 50);      // строка состояния
+}
+
 static void test_air_visible_by_co2_or_tvoc() {
     Store store;
     TEST_ASSERT_FALSE(widget_visible("air", store));
@@ -711,6 +772,10 @@ int main() {
     RUN_TEST(test_limits_visible_by_any_window);
     RUN_TEST(test_limits_visible_by_failure_reason_alone);
     RUN_TEST(test_limits_visible_by_reason_after_data_went_stale);
+    RUN_TEST(test_widgets_visible_by_failure_reason);
+    RUN_TEST(test_reason_blocks_render_text);
+    RUN_TEST(test_mail_time_keeps_inset_from_right_edge);
+    RUN_TEST(test_boot_screen_renders);
     RUN_TEST(test_limits_hidden_when_failure_has_no_reason);
     RUN_TEST(test_limits_error_row_renders_reason_text);
     RUN_TEST(test_air_visible_by_co2_or_tvoc);

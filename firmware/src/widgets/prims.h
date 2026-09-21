@@ -77,6 +77,17 @@ void draw_air_metric(canvas::Canvas& c, layout::Rect area, const char* label, co
 // error непустой); виджеты лимитов считают такой блок видимым.
 bool has_failure_reason(const slots::Store& store, const char* status_slot);
 
+// Причина отказа для блока: первый из status-слотов (`<коннектор>.status`,
+// nullptr-terminated список) с ok=false и непустым error; nullptr — сказать
+// нечего. Правило владельца: блок без данных не исчезает, а объясняет
+// (2026-09-22, «как у лимитов — и для остальных блоков тоже»).
+const char* failure_reason(const slots::Store& store, const char* const* status_slots);
+
+// Блок-объяснение вместо данных: эйброу рубрики и строка причины Terminus14
+// под ним, обрезанная по ширине. Один вид для всех виджетов — на однобитной
+// панели разнобой заглушек читался бы как разные поломки.
+void draw_reason_block(canvas::Canvas& c, layout::Rect r, const char* eyebrow, const char* reason);
+
 void draw_limits_and_air(canvas::Canvas& c, const slots::Store& store,
                          const layout::DeviceInfo& d, layout::Rect r, bool show_limits,
                          bool show_air);

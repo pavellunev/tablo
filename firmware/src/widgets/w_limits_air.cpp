@@ -27,7 +27,8 @@ bool limits_air_visible(const Store& store, const Instance&) {
            // причина отказа источника тоже показывается (prims.cpp,
            // limits_error_text) — блок не исчезает, пока есть что сказать
            prims::has_failure_reason(store, "claude.status") ||
-           prims::has_failure_reason(store, "codex.status") || layout::has_data(store.find("co2")) ||
+           prims::has_failure_reason(store, "codex.status") ||
+           prims::has_failure_reason(store, "home.status") || layout::has_data(store.find("co2")) ||
            layout::has_data(store.find("tvoc"));
 }
 
