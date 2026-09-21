@@ -1,17 +1,31 @@
-// Тесты чистой логики раскладки — выбор блоков по наличию слотов, пересборка
-// сетки при их отсутствии, форматирование значений. Рисование (draw_frame и
-// приватные draw_*) не тестируется юнит-тестами: у него нет числового
-// результата, который стоило бы сверять построчно — сверка глазами через
-// tools/render_frame/build_and_run.sh (см. .claude/plans/inkroam.md).
+// Тесты чистой логики раскладки — видимость виджетов, пересборка ряда при
+// отсутствии части из них, форматирование значений. Рисование (draw_frame и
+// widgets::w_*.cpp::*_draw) не тестируется юнит-тестами: у него нет
+// числового результата, который стоило бы сверять построчно — сверка глазами
+// через tools/render_frame/build_and_run.sh (см. .claude/plans/inkroam.md).
 //
 // layout.cpp подключается исходником по тому же приёму, что и slots.cpp/
 // connectors.cpp в test_slots — test_build_src не включён, см. их комментарий.
+// Реестр виджетов (widgets/*.cpp) — тем же приёмом: draw_frame и
+// widgets::find/all зовут друг друга, а раздельная компиляция здесь не
+// нужна ровно как остальным исходникам этого теста.
 #include <unity.h>
 
 #include "../../src/canvas.cpp"
 #include "../../src/canvas_mem.cpp"
 #include "../../src/font.cpp"
 #include "../../src/wifi_qr.cpp"  // layout.cpp зовёт wifi_qr:: в draw_ap_credentials
+#include "../../src/widgets/types.cpp"
+#include "../../src/widgets/prims.cpp"
+#include "../../src/widgets/w_markets.cpp"
+#include "../../src/widgets/w_limits.cpp"
+#include "../../src/widgets/w_air.cpp"
+#include "../../src/widgets/w_limits_air.cpp"
+#include "../../src/widgets/w_mail.cpp"
+#include "../../src/widgets/w_today.cpp"
+#include "../../src/widgets/w_metric.cpp"
+#include "../../src/widgets/w_text.cpp"
+#include "../../src/widgets/registry.cpp"
 #include "../../src/layout.cpp"
 #include "../../src/slots.cpp"
 
@@ -166,7 +180,9 @@ static void test_format_value_stale_gets_approx_mark() {
     TEST_ASSERT_EQUAL_STRING("≈620", format_value(&s, 1000, 0, "").c_str());
 }
 
-// ── видимость блоков ──
+// ── видимость виджетов (widgets::Spec::visible — раньше жила здесь пятью
+// функциями rates_visible/limits_visible/..., переехала в widgets/w_*.cpp,
+// см. .claude/plans/constructor.md) ──
 
 static void put_ok(Store& store, const char* id, float number = 1) {
     Slot s;
@@ -177,40 +193,157 @@ static void put_ok(Store& store, const char* id, float number = 1) {
     store.put(id, s);
 }
 
-static void test_rates_visible_by_any_of_three_slots() {
+static bool widget_visible(const char* type, const Store& store) {
+    const widgets::Spec* spec = widgets::find(type);
+    TEST_ASSERT_NOT_NULL(spec);
+    return spec->visible(store, widgets::Instance{});
+}
+
+static void test_markets_visible_by_any_of_three_slots() {
     Store store;
-    TEST_ASSERT_FALSE(rates_visible(store));
+    TEST_ASSERT_FALSE(widget_visible("markets", store));
     put_ok(store, "eur_rub");
-    TEST_ASSERT_TRUE(rates_visible(store));
+    TEST_ASSERT_TRUE(widget_visible("markets", store));
 }
 
 static void test_limits_visible_by_any_window() {
     Store store;
-    TEST_ASSERT_FALSE(limits_visible(store));
+    TEST_ASSERT_FALSE(widget_visible("limits", store));
     put_ok(store, "limit.codex");
-    TEST_ASSERT_TRUE(limits_visible(store));
+    TEST_ASSERT_TRUE(widget_visible("limits", store));
+}
+
+static void test_limits_visible_by_failure_reason_alone() {
+    Store store;
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    TEST_ASSERT_TRUE(widget_visible("limits", store));
+    TEST_ASSERT_TRUE(widget_visible("limits_air", store));
+}
+
+static void test_limits_visible_by_reason_after_data_went_stale() {
+    // Тёплый путь: лимит был, потом 429 — блок остаётся и объясняет причину.
+    Store store;
+    Slot v; v.ok = true; v.at = 100; v.ttl = 60; v.number = 42;
+    store.put("limit.claude.5h", v, "claude");
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    TEST_ASSERT_TRUE(widget_visible("limits", store));
+}
+
+static void test_limits_hidden_when_failure_has_no_reason() {
+    Store store;
+    store.mark_failed(String("claude"));  // без причины — заглушки нет, сказать нечего
+    TEST_ASSERT_FALSE(widget_visible("limits", store));
+}
+
+static void test_limits_error_row_renders_reason_text() {
+    // Кадр с одной лишь причиной отказа рисуется без падения и не пуст в
+    // области блока — прямой контракт «показывать ошибку, а не прятать блок».
+    Store store;
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    canvas::CanvasMemory cv(800, 480);
+    cv.fill(canvas::Color::White);
+    DeviceInfo d;
+    widgets::Instance inst;
+    inst.type = "limits";
+    widgets::find("limits")->draw(cv, store, d, Rect{330, 60, 455, 200}, inst);
+    int dark = 0;
+    for (int y = 60; y < 140; ++y)
+        for (int x = 330; x < 785; ++x)
+            if (cv.at(x, y)) ++dark;
+    TEST_ASSERT_TRUE(dark > 200);
 }
 
 static void test_air_visible_by_co2_or_tvoc() {
     Store store;
-    TEST_ASSERT_FALSE(air_visible(store));
+    TEST_ASSERT_FALSE(widget_visible("air", store));
     put_ok(store, "tvoc");
-    TEST_ASSERT_TRUE(air_visible(store));
+    TEST_ASSERT_TRUE(widget_visible("air", store));
+}
+
+static void test_limits_air_visible_by_either_half() {
+    Store store;
+    TEST_ASSERT_FALSE(widget_visible("limits_air", store));
+    put_ok(store, "co2");
+    TEST_ASSERT_TRUE(widget_visible("limits_air", store));
 }
 
 static void test_mail_visible_requires_unread_counter() {
     Store store;
-    TEST_ASSERT_FALSE(mail_visible(store));
+    TEST_ASSERT_FALSE(widget_visible("mail", store));
     put_ok(store, "mail.unread", 0);  // счётчик есть, даже если равен нулю —
     // Slot::empty() решает по ok/at, не по числовому значению.
-    TEST_ASSERT_TRUE(mail_visible(store));
+    TEST_ASSERT_TRUE(widget_visible("mail", store));
 }
 
 static void test_today_visible_by_weather_or_first_event() {
     Store store;
-    TEST_ASSERT_FALSE(today_visible(store));
+    TEST_ASSERT_FALSE(widget_visible("today", store));
     put_ok(store, "event.1.title");
-    TEST_ASSERT_TRUE(today_visible(store));
+    TEST_ASSERT_TRUE(widget_visible("today", store));
+}
+
+static void test_metric_visible_by_its_own_slot() {
+    Store store;
+    widgets::Instance instance;
+    instance.type = "metric";
+    instance.slot = "co2";
+    const widgets::Spec* spec = widgets::find("metric");
+    TEST_ASSERT_FALSE(spec->visible(store, instance));
+    put_ok(store, "co2");
+    TEST_ASSERT_TRUE(spec->visible(store, instance));
+}
+
+static void test_text_is_always_visible() {
+    Store store;
+    TEST_ASSERT_TRUE(widget_visible("text", store));
+}
+
+static void test_find_unknown_type_is_null() { TEST_ASSERT_NULL(widgets::find("bogus")); }
+
+// ── реестр (widgets::all) согласован с лёгкой таблицей типов
+// (widgets::find_type, widgets/types.cpp): default_size/min_width
+// дублируются намеренно (docs/widgets.md, types.h) — этот тест держит их в
+// одном значении, а не полагается на память при следующей правке.
+static void test_widgets_registry_matches_types_table() {
+    size_t count = 0;
+    const widgets::Spec* const* all = widgets::all(&count);
+    TEST_ASSERT_TRUE(count > 0);
+    for (size_t i = 0; i < count; ++i) {
+        const widgets::TypeInfo* info = widgets::find_type(all[i]->type);
+        TEST_ASSERT_NOT_NULL(info);
+        TEST_ASSERT_TRUE(info->default_size == all[i]->default_size);
+        TEST_ASSERT_EQUAL(info->min_width, all[i]->min_width);
+    }
+}
+
+// ── required_slots ──
+
+static void test_required_slots_for_static_widget_lists_spec_slots() {
+    widgets::Instance instance;
+    instance.type = "air";
+    std::vector<String> out;
+    widgets::required_slots(instance, out);
+    TEST_ASSERT_EQUAL(2, out.size());
+    TEST_ASSERT_EQUAL_STRING("co2", out[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("tvoc", out[1].c_str());
+}
+
+static void test_required_slots_for_metric_uses_instance_slot() {
+    widgets::Instance instance;
+    instance.type = "metric";
+    instance.slot = "weather.temp";
+    std::vector<String> out;
+    widgets::required_slots(instance, out);
+    TEST_ASSERT_EQUAL(1, out.size());
+    TEST_ASSERT_EQUAL_STRING("weather.temp", out[0].c_str());
+}
+
+static void test_required_slots_for_metric_without_slot_is_empty() {
+    widgets::Instance instance;
+    instance.type = "metric";
+    std::vector<String> out;
+    widgets::required_slots(instance, out);
+    TEST_ASSERT_EQUAL(0, out.size());
 }
 
 // ── compute_columns ──
@@ -373,6 +506,92 @@ static void test_compute_two_rows_neither_present_both_zero() {
     TEST_ASSERT_EQUAL(0, r2.h);
 }
 
+// ── layout_row — общее правило ряда дашборда (S/M/flex), docs/widgets.md.
+// Заводской «Стол» — компоновка через эту функцию должна дать те же числа,
+// что раньше давали compute_columns_fixed_first/_second выше (см. их тесты):
+// это и есть проверка, что переход на дашборды не сдвинул эталон.
+
+static widgets::Instance sized(widgets::Size size, bool divider = false) {
+    widgets::Instance i;
+    i.size = size;
+    i.divider = divider;
+    return i;
+}
+
+static void test_layout_row_fixed_m_plus_flex_matches_fixed_first() {
+    // Верхний ряд «Стола»: Рынки (M, 296) + Лимиты-и-Воздух (flex) — тот же
+    // row/gap, что test_fixed_first_both_visible_first_keeps_fixed_width.
+    Rect row{15, 0, 770, 200};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kM), sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {true, true};
+    Rect out[2];
+    layout_row(row, 19, items, visible, out);
+    TEST_ASSERT_EQUAL(15, out[0].x);
+    TEST_ASSERT_EQUAL(296, out[0].w);
+    TEST_ASSERT_EQUAL(330, out[1].x);  // 15 + 296 + 19
+    TEST_ASSERT_EQUAL(455, out[1].w);  // 770 - 296 - 19
+}
+
+static void test_layout_row_flex_plus_fixed_s_matches_fixed_second() {
+    // Нижний ряд «Стола»: Почта (flex) + Сегодня (S, 202) — тот же row/gap,
+    // что test_fixed_second_both_visible_second_keeps_fixed_width.
+    Rect row{15, 0, 770, 150};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kFlex),
+                                             sized(widgets::Size::kS, /*divider=*/true)};
+    std::vector<bool> visible = {true, true};
+    Rect out[2];
+    layout_row(row, 17, items, visible, out);
+    TEST_ASSERT_EQUAL(202, out[1].w);
+    TEST_ASSERT_EQUAL(583, out[1].x);  // 15 + 770 - 202
+    TEST_ASSERT_EQUAL(15, out[0].x);
+    TEST_ASSERT_EQUAL(551, out[0].w);  // 583 - 17 - 15
+}
+
+static void test_layout_row_single_visible_takes_full_width_regardless_of_token() {
+    // Правая колонка пропала — единственный видимый (M) получает всю
+    // ширину ряда, не свои номинальные 296px: n=1, flex среди видимых нет —
+    // «делят поровну» на одного и есть вся ширина (docs/widgets.md).
+    Rect row{15, 0, 770, 200};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kM), sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {true, false};
+    Rect out[2];
+    layout_row(row, 19, items, visible, out);
+    TEST_ASSERT_EQUAL(770, out[0].w);
+    TEST_ASSERT_EQUAL(0, out[1].w);
+}
+
+static void test_layout_row_no_flex_among_visible_splits_evenly() {
+    Rect row{0, 0, 300, 50};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kM), sized(widgets::Size::kS)};
+    std::vector<bool> visible = {true, true};
+    Rect out[2];
+    layout_row(row, 12, items, visible, out);
+    // (300-12)/2 = 144, не 296/202 — оба видимых без единого flex делят ряд
+    // поровну, номинальные S/M-токены здесь не участвуют.
+    TEST_ASSERT_EQUAL(144, out[0].w);
+    TEST_ASSERT_EQUAL(144, out[1].w);
+}
+
+static void test_layout_row_multiple_flex_share_remainder_equally() {
+    Rect row{0, 0, 300, 50};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kFlex), sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {true, true};
+    Rect out[2];
+    layout_row(row, 12, items, visible, out);
+    TEST_ASSERT_EQUAL(144, out[0].w);  // (300-12)/2, как и без токенов
+    TEST_ASSERT_EQUAL(144, out[1].w);
+}
+
+static void test_layout_row_none_visible_all_zero() {
+    Rect row{0, 0, 300, 50};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kFlex), sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {false, false};
+    Rect out[2];
+    layout_row(row, 12, items, visible, out);
+    TEST_ASSERT_EQUAL(0, out[0].w);
+    TEST_ASSERT_EQUAL(0, out[1].w);
+}
+
 // ── font: decode_utf8 / find_glyph / text_width (byстрая проверка на границе
 // ASCII/кириллицы, чтобы не полагаться только на глазастую сверку PNG) ──
 
@@ -431,6 +650,36 @@ void test_negative_keeps_sign_next_to_digits(void) {
     TEST_ASSERT_EQUAL_STRING("-80 689", layout::format_decimal(-80689.0f, 0).c_str());
 }
 
+static void test_layout_row_overflow_falls_back_to_equal_split() {
+    // Три M (888 px) в ряду 770 px + flex: фиксированные не влезают — ряд
+    // делится поровну между четырьмя видимыми, никто не уезжает за край.
+    Rect row{15, 0, 770, 200};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kM), sized(widgets::Size::kM),
+                                            sized(widgets::Size::kM), sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {true, true, true, true};
+    Rect out[4];
+    layout_row(row, 19, items, visible, out);
+    const int16_t expected = (770 - 3 * 19) / 4;  // 178
+    for (int i = 0; i < 4; ++i) {
+        TEST_ASSERT_EQUAL(expected, out[i].w);
+        TEST_ASSERT_TRUE(out[i].x + out[i].w <= 15 + 770);
+    }
+}
+
+static void test_layout_row_fixed_that_fits_keeps_fixed_widths() {
+    // Граница: M + S + flex = 296 + 202 + 2 зазора + минимум flex (120) = 656 ≤ 770 —
+    // не переполнение, фиксированные сохраняют свои пиксели.
+    Rect row{15, 0, 770, 200};
+    std::vector<widgets::Instance> items = {sized(widgets::Size::kM), sized(widgets::Size::kS),
+                                            sized(widgets::Size::kFlex)};
+    std::vector<bool> visible = {true, true, true};
+    Rect out[3];
+    layout_row(row, 19, items, visible, out);
+    TEST_ASSERT_EQUAL(296, out[0].w);
+    TEST_ASSERT_EQUAL(202, out[1].w);
+    TEST_ASSERT_EQUAL(770 - 296 - 202 - 38, out[2].w);
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -458,11 +707,24 @@ int main() {
     RUN_TEST(test_format_value_fresh_decimals_and_suffix);
     RUN_TEST(test_format_value_stale_gets_approx_mark);
 
-    RUN_TEST(test_rates_visible_by_any_of_three_slots);
+    RUN_TEST(test_markets_visible_by_any_of_three_slots);
     RUN_TEST(test_limits_visible_by_any_window);
+    RUN_TEST(test_limits_visible_by_failure_reason_alone);
+    RUN_TEST(test_limits_visible_by_reason_after_data_went_stale);
+    RUN_TEST(test_limits_hidden_when_failure_has_no_reason);
+    RUN_TEST(test_limits_error_row_renders_reason_text);
     RUN_TEST(test_air_visible_by_co2_or_tvoc);
+    RUN_TEST(test_limits_air_visible_by_either_half);
     RUN_TEST(test_mail_visible_requires_unread_counter);
     RUN_TEST(test_today_visible_by_weather_or_first_event);
+    RUN_TEST(test_metric_visible_by_its_own_slot);
+    RUN_TEST(test_text_is_always_visible);
+    RUN_TEST(test_find_unknown_type_is_null);
+    RUN_TEST(test_widgets_registry_matches_types_table);
+
+    RUN_TEST(test_required_slots_for_static_widget_lists_spec_slots);
+    RUN_TEST(test_required_slots_for_metric_uses_instance_slot);
+    RUN_TEST(test_required_slots_for_metric_without_slot_is_empty);
 
     RUN_TEST(test_compute_columns_all_visible_equal_width);
     RUN_TEST(test_compute_columns_missing_one_widens_the_rest_without_gap);
@@ -481,6 +743,15 @@ int main() {
     RUN_TEST(test_compute_two_rows_only_first_gets_full_body);
     RUN_TEST(test_compute_two_rows_only_second_gets_full_body);
     RUN_TEST(test_compute_two_rows_neither_present_both_zero);
+
+    RUN_TEST(test_layout_row_fixed_m_plus_flex_matches_fixed_first);
+    RUN_TEST(test_layout_row_flex_plus_fixed_s_matches_fixed_second);
+    RUN_TEST(test_layout_row_single_visible_takes_full_width_regardless_of_token);
+    RUN_TEST(test_layout_row_no_flex_among_visible_splits_evenly);
+    RUN_TEST(test_layout_row_multiple_flex_share_remainder_equally);
+    RUN_TEST(test_layout_row_none_visible_all_zero);
+    RUN_TEST(test_layout_row_overflow_falls_back_to_equal_split);
+    RUN_TEST(test_layout_row_fixed_that_fits_keeps_fixed_widths);
 
     RUN_TEST(test_decode_utf8_ascii);
     RUN_TEST(test_decode_utf8_two_byte_cyrillic);

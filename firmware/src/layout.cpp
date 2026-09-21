@@ -1,31 +1,26 @@
-// Раскладка — точное воспроизведение структуры cockpit.html (эталон:
-// reference/cockpit-reference.png). Числа ниже — не оценка на глаз, а обмер
-// эталона тем же способом, каким его потом проверяет tools/compare_frame.py
-// (самый длинный сплошной пробег тёмных пикселей в строке/столбце — линия,
-// текст такого пробега не даёт). Там же, где эталон один-единственный
-// снимок, а не описание, — часть чисел (жёсткие межстрочные интервалы)
-// получены как разница координат соседних элементов на НЁМ, и дальше
-// применяются как константы шага, а не как абсолютные позиции: если
-// какого-то элемента (скажем, BTC) нет, следующий подряд идущий просто
-// встаёт на его место — так же, как в cockpit.html скрытый `{% if %}`-блок
-// не оставляет пустоты в потоке документа. Подробный разбор — Status Log в
-// .claude/plans/inkroam.md.
+// Раскладка — шапка кадра плюс сборка дашборда по данным. Числа каркаса ниже
+// — не оценка на глаз, а обмер эталона тем же способом, каким его потом
+// проверяет tools/compare_frame.py (самый длинный сплошной пробег тёмных
+// пикселей в строке/столбце — линия, текст такого пробега не даёт). Подробный
+// разбор — Status Log в .claude/plans/inkroam.md.
+//
+// Отрисовка конкретных блоков (Рынки, Лимиты, Воздух, Почта, Сегодня, …)
+// переехала в widgets/w_*.cpp — единый протокол виджета (widgets/widget.h,
+// docs/widgets.md). Здесь остаётся то, что знает только раскладка: шапка,
+// арифметика календаря, правило ряда (S/M/flex) и сборка активного
+// дашборда — draw_frame() ниже просто раскладывает виджеты по их Spec и не
+// знает имён конкретных слотов.
 #include "layout.h"
 
 #include <cstdio>
 #include <string>
 
 #include "../assets/terminus_14.h"
-#include "../assets/terminus_16.h"
-#include "../assets/terminus_20.h"
 #include "../assets/terminus_24.h"
-#include "../assets/plexmono_14.h"
-#include "../assets/plexmono_16.h"
-#include "../assets/plexmono_20.h"
-#include "../assets/plexmono_25.h"
-#include "../assets/plexmono_28.h"
-#include "../assets/plexmono_41.h"
+#include "config.h"
 #include "font.h"
+#include "widgets/prims.h"
+#include "widgets/widget.h"
 #include "wifi_qr.h"
 
 namespace layout {
@@ -45,13 +40,10 @@ constexpr int16_t HEADER_RULE_Y = 49;   // горизонтальная лини
 constexpr int16_t BODY_TOP = 63;        // y верхнего ряда — эйброу-линия ляжет на 71
 constexpr int16_t ROW_DIVIDER_Y = 298;  // линия между верхним и нижним рядом
 constexpr int16_t ROW_GAP = 12;         // 310 - 298
-constexpr int16_t RATES_WIDTH = 296;    // Рынки — flex:none в cockpit.html
-constexpr int16_t TODAY_WIDTH = 202;    // Сегодня — тоже flex:none, но справа
-constexpr int16_t TOP_GAP = 19;         // между Рынками и правой колонкой
-constexpr int16_t BOTTOM_GAP = 17;      // между Почтой и Сегодня
-
-constexpr int16_t EYEBROW_TEXT_OFFSET = 14;  // r.y -> базовая линия текста эйброу
-constexpr int16_t EYEBROW_LINE_OFFSET = 8;   // r.y -> подчёркивающая линия (=71 при r.y=63)
+// Зазор между виджетами В РЯДУ — раздельно по рядам, TOP_GAP != BOTTOM_GAP в
+// эталоне (19 против 17), см. docs/widgets.md, «Правило ряда».
+constexpr int16_t TOP_GAP = 19;     // между Рынками и правой колонкой
+constexpr int16_t BOTTOM_GAP = 17;  // между Почтой и Сегодня
 
 const char* const WEEKDAYS[7] = {"ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"};
 const char* const MONTHS[12] = {"ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА",   "АПРЕЛЯ", "МАЯ",    "ИЮНЯ",
@@ -81,211 +73,6 @@ void civil_from_days(int64_t z, int* year, unsigned* month, unsigned* day) {
     *day = doy - (153 * mp + 2) / 5 + 1;                     // [1, 31]
     *month = mp + (mp < 10 ? 3 : static_cast<unsigned>(-9));  // [1, 12]
     *year = static_cast<int>(y + (*month <= 2 ? 1 : 0));
-}
-
-// ── форматирование чисел без конкатенации String (см. Arduino.h-шим тестов и
-// прецедент connectors.cpp: строки собираются через snprintf/std::string, а
-// не через operator+, которого нет в тестовом шиме). ──
-
-
-// "▼0,37%" — стрелка направления плюс модуль изменения. Общая для BTC и
-// USD/RUB, EUR/RUB: в эталоне дельта есть у каждой котировки.
-String format_delta(float delta_pct) {
-    char buf[24];
-    const char* arrow = delta_pct >= 0 ? "▲" : "▼";
-    float magnitude = delta_pct >= 0 ? delta_pct : -delta_pct;
-    std::snprintf(buf, sizeof(buf), "%s%.2f%%", arrow, static_cast<double>(magnitude));
-    for (char* p = buf; *p; ++p) {
-        if (*p == '.') *p = ',';
-    }
-    return String(buf);
-}
-
-// Обрезает строку по ширине в пикселях, дописывая многоточие. Режем по
-// кодовым точкам, а не по байтам, — иначе можно обрубить середину
-// многобайтовой кириллицы.
-String truncate_to_width(const fonts::GFXfont& font, const char* utf8, int16_t max_width) {
-    if (text_width(font, utf8) <= max_width) return String(utf8);
-
-    const char* ellipsis = "…";
-    int16_t ellipsis_w = text_width(font, ellipsis);
-    int16_t budget = static_cast<int16_t>(max_width - ellipsis_w);
-    if (budget <= 0) return String(ellipsis);
-
-    const char* p = utf8;
-    const char* last_good = utf8;
-    int16_t width = 0;
-    while (*p) {
-        uint32_t cp = fonts::decode_utf8(p);
-        const fonts::GFXglyph* g = fonts::find_glyph(font, cp);
-        int16_t adv = g ? g->xAdvance : 0;
-        if (static_cast<int16_t>(width + adv) > budget) break;
-        width = static_cast<int16_t>(width + adv);
-        last_good = p;
-    }
-    std::string cut(utf8, static_cast<size_t>(last_good - utf8));
-    cut += "…";
-    return String(cut.c_str());
-}
-
-int16_t clampi(int16_t v, int16_t lo, int16_t hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-// Спарклайну нужен ряд точек, заканчивающийся текущим значением: history —
-// то, что накопил Store::put() до этого замера, number — самый свежий.
-uint8_t build_spark(const Slot& s, float* out, uint8_t max_len) {
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < s.history_len && n < max_len; ++i) out[n++] = s.history[i];
-    if (n < max_len) out[n++] = s.number;
-    return n;
-}
-
-// Сглаживание простым скользящим средним по трём точкам — эталон рисует
-// плавную кривую (SVG polyline по большему числу отсчётов, чем у нас в
-// истории), у сырых 5-8 точек истории с прямыми отрезками между ними кривая
-// выглядит острой пилой. Сглаживание не меняет число точек и не искажает
-// крайние (первую/последнюю не трогаем — иначе график «не доходил» бы до
-// правого края, а последняя точка обязана быть текущим значением).
-void smooth3(const float* in, uint8_t count, float* out) {
-    if (count == 0) return;
-    out[0] = in[0];
-    for (uint8_t i = 1; i + 1 < count; ++i) {
-        out[i] = (in[i - 1] + in[i] * 2.0f + in[i + 1]) / 4.0f;
-    }
-    if (count > 1) out[count - 1] = in[count - 1];
-}
-
-// Заливка под кривой регулярным растром. На 1-битной панели это единственный
-// способ дать «полупрозрачную» область: сплошная заливка забила бы блок
-// чёрным, а без заливки кривая теряется среди прочих линий кадра.
-void fill_under_curve(Canvas& c, Rect r, int16_t x, int16_t curve_y) {
-    for (int16_t y = static_cast<int16_t>(curve_y + 2); y < r.y + r.h; ++y) {
-        // Точечный растр: каждая вторая точка в каждой второй строке.
-        // Условие по сумме координат дало бы диагональную штриховку — она
-        // спорит с самой кривой и читается как отдельная линия.
-        if ((x & 1) == 0 && (y & 1) == 0) {
-            c.pixel(x, y, Color::Black);
-        }
-    }
-}
-
-void draw_sparkline(Canvas& c, Rect r, const float* raw_values, uint8_t count,
-                    bool fill_below = false) {
-    if (count < 2 || r.w <= 1 || r.h <= 1) return;
-    float smoothed[Slot::kHistoryCapacity + 1];
-    smooth3(raw_values, count, smoothed);
-    const float* values = smoothed;
-
-    float lo = values[0], hi = values[0];
-    for (uint8_t i = 1; i < count; ++i) {
-        if (values[i] < lo) lo = values[i];
-        if (values[i] > hi) hi = values[i];
-    }
-    float range = hi - lo;
-    // Минимальный диапазон — 1% от величины. Иначе две первые точки после
-    // включения рисуются клином на всю высоту блока: их разница и есть весь
-    // диапазон, и колебание курса в десятые процента читается как обвал.
-    const float mid = (hi + lo) * 0.5f;
-    const float floor_range = (mid < 0 ? -mid : mid) * 0.01f;
-    if (range < floor_range) {
-        lo = mid - floor_range * 0.5f;
-        hi = mid + floor_range * 0.5f;
-        range = hi - lo;
-    }
-    if (range < 1e-6f) range = 1.0f;
-
-    int16_t prev_x = 0, prev_y = 0;
-    for (uint8_t i = 0; i < count; ++i) {
-        int16_t x = static_cast<int16_t>(r.x + (static_cast<float>(i) / (count - 1)) * (r.w - 1));
-        int16_t y = static_cast<int16_t>(r.y + r.h - 1 -
-                                          ((values[i] - lo) / range) * (r.h - 1));
-        if (i > 0) {
-            c.line(prev_x, prev_y, x, y, Color::Black);
-            c.line(prev_x, static_cast<int16_t>(prev_y + 1), x, static_cast<int16_t>(y + 1),
-                   Color::Black);
-            // Заливаем столбцы между предыдущей и текущей точкой, интерполируя
-            // высоту кривой: иначе растр отстаёт от линии на крутых участках.
-            for (int16_t px = fill_below ? prev_x : x + 1; px <= x; ++px) {
-                float t = (x == prev_x) ? 0.0f
-                                        : static_cast<float>(px - prev_x) / (x - prev_x);
-                int16_t cy = static_cast<int16_t>(prev_y + t * (y - prev_y));
-                fill_under_curve(c, r, px, cy);
-            }
-        }
-        prev_x = x;
-        prev_y = y;
-    }
-}
-
-// Сеточная штриховка «в горошек» — как .seg.part (repeating-conic-gradient) у
-// эталона: сегмент шкалы, заполненный не целиком, а на дробную часть,
-// закрашивается не сплошным чёрным и не пустым контуром, а решёткой из точек.
-// Так видно, что это НЕ полный процент и НЕ ноль, — третье состояние, а не
-// просто округление.
-void fill_hatched(Canvas& c, int16_t x, int16_t y, int16_t w, int16_t h) {
-    for (int16_t py = y; py < y + h; py += 2) {
-        for (int16_t px = x; px < x + w; px += 2) {
-            c.pixel(px, py, Color::Black);
-        }
-    }
-}
-
-// Полоски вместо диаграммы — тот же приём, что .segbar/.seg в cockpit.html:
-// сплошная заливка на полностью занятые деления, штриховка на дробный остаток
-// (см. fill_hatched), пустой контур на остальные. Зазор между сегментами
-// (3px) даёт видимый разрыв на любом разумном их числе.
-void draw_segbar(Canvas& c, Rect r, float pct, uint8_t segments) {
-    if (pct < 0) pct = 0;
-    if (pct > 100) pct = 100;
-    if (segments == 0) return;
-    float exact_filled = pct / 100.0f * segments;
-    uint8_t full = static_cast<uint8_t>(exact_filled);
-    float frac = exact_filled - full;
-    constexpr int16_t kGap = 3;
-    int16_t seg_w = static_cast<int16_t>(r.w / segments);
-    for (uint8_t i = 0; i < segments; ++i) {
-        int16_t x = static_cast<int16_t>(r.x + i * seg_w);
-        // Все деления одной ширины. Раньше последнее добирало остаток от
-        // деления — на глаз шкала выглядела кривой, а по её длине нельзя
-        // посчитать заполнение: одно деление стоило больше остальных.
-        int16_t w = static_cast<int16_t>(seg_w - kGap);
-        if (w <= 0) continue;
-        if (i < full) {
-            c.fill_rect(x, r.y, w, r.h, Color::Black);
-        } else if (i == full && frac > 0.05f) {
-            c.rect(x, r.y, w, r.h, Color::Black);
-            fill_hatched(c, x, r.y, w, r.h);
-        } else {
-            c.rect(x, r.y, w, r.h, Color::Black);
-        }
-    }
-}
-
-void draw_eyebrow(Canvas& c, Rect r, const char* label) {
-    draw_text(c, fonts::Terminus16, r.x, static_cast<int16_t>(r.y + EYEBROW_TEXT_OFFSET), label,
-              Color::Black, 1, /*bold=*/true);
-    int16_t lw = text_width(fonts::Terminus16, label);
-    int16_t line_x = static_cast<int16_t>(r.x + lw + 8);
-    if (line_x < r.x + r.w) {
-        c.hline(line_x, static_cast<int16_t>(r.y + EYEBROW_LINE_OFFSET),
-                static_cast<int16_t>(r.x + r.w - line_x), Color::Black);
-    }
-}
-
-// Инверсная плашка — белым по чёрному, как .inv в cockpit.html ("Почта").
-// draw_text кладёт только «горящие» биты глифа — если под ними уже залитый
-// чёрным прямоугольник, а цвет самого текста White, получаются белые буквы
-// на чёрном без отдельной поддержки в движке шрифта.
-int16_t draw_inverse_label(Canvas& c, int16_t x, int16_t baseline_y, const char* label) {
-    int16_t text_w = text_width(fonts::Terminus16, label);
-    constexpr int16_t kPadX = 7;
-    constexpr int16_t kAbove = 14;
-    constexpr int16_t kBelow = 4;
-    int16_t plate_w = static_cast<int16_t>(text_w + 2 * kPadX);
-    c.fill_rect(x, static_cast<int16_t>(baseline_y - kAbove), plate_w,
-                static_cast<int16_t>(kAbove + kBelow), Color::Black);
-    draw_text(c, fonts::Terminus16, static_cast<int16_t>(x + kPadX), baseline_y, label,
-              Color::White, 1, /*bold=*/true);
-    return plate_w;
 }
 
 void draw_wifi_bars(Canvas& c, int16_t x, int16_t y, int8_t bars) {
@@ -357,405 +144,6 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
 
     c.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(c.width() - 2 * MARGIN), 2,
                 Color::Black);
-}
-
-// ── рынки (левая колонка верхнего ряда, ширина фиксирована — RATES_WIDTH) ──
-//
-// Курс BTC несёт визуальную доминанту кадра, как в эталоне (.num, 41px) —
-// рисуется IBM Plex Mono Bold в точном пиксельном кегле, без кратного
-// увеличения Terminus (как было до появления второго шрифта): у векторного
-// контура, в отличие от растра Terminus, есть кегль ровно 41, не только
-// ближайший из фиксированной сетки.
-
-void draw_rates(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
-    draw_eyebrow(c, r, "РЫНКИ");
-    int16_t y = static_cast<int16_t>(r.y + EYEBROW_TEXT_OFFSET);  // базовая линия эйброу
-
-    const Slot* btc = store.find("btc");
-    const Slot* usd_rub = store.find("usd_rub");
-    const Slot* eur_rub = store.find("eur_rub");
-
-    if (has_data(btc)) {
-        int16_t label_baseline = static_cast<int16_t>(y + 22);
-        draw_text(c, fonts::Terminus14, r.x, label_baseline, "BTC / USD", Color::Black, 1, /*bold=*/true);
-
-        String delta = format_delta(btc->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
-                  delta.c_str(), Color::Black, 1, /*bold=*/true);
-        const char* period = "ЗА 24 Ч";
-        int16_t pw = text_width(fonts::Terminus14, period);
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - pw),
-                  static_cast<int16_t>(label_baseline + 18), period, Color::Black, 1, /*bold=*/true);
-
-        int16_t number_baseline = static_cast<int16_t>(label_baseline + 41);
-        String value = format_value(btc, d.now, 0, "");
-        draw_text(c, fonts::PlexMono41, r.x, number_baseline, value.c_str(), Color::Black);
-
-        int16_t spark_top = static_cast<int16_t>(number_baseline + 10);
-        constexpr int16_t kSparkH = 47;
-        float spark[Slot::kHistoryCapacity + 1];
-        uint8_t n = build_spark(*btc, spark, static_cast<uint8_t>(Slot::kHistoryCapacity + 1));
-        draw_sparkline(c, Rect{r.x, spark_top, r.w, kSparkH}, spark, n, /*fill_below=*/true);
-
-        int16_t hair_y = static_cast<int16_t>(spark_top + kSparkH + 10);
-        c.hline(r.x, hair_y, r.w, Color::Black);
-        y = static_cast<int16_t>(hair_y + 31 - 22);  // -22: компенсация общего шага ниже
-    }
-    y = static_cast<int16_t>(y + 22);  // общий шаг до первой строки курса
-
-    struct Pair {
-        const Slot* slot;
-        const char* label;
-    };
-    const Pair pairs[2] = {{usd_rub, "USD / RUB"}, {eur_rub, "EUR / RUB"}};
-    for (const Pair& p : pairs) {
-        if (!has_data(p.slot)) continue;
-
-        draw_text(c, fonts::Terminus14, r.x, y, p.label, Color::Black, 1, /*bold=*/true);
-
-        String delta = format_delta(p.slot->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
-                  Color::Black, 1, /*bold=*/true);
-
-        String val = format_value(p.slot, d.now, 2, "");
-        int16_t vw = text_width(fonts::PlexMono25, val.c_str());
-        draw_text(c, fonts::PlexMono25, static_cast<int16_t>(r.x + r.w - dw - vw - 10), y,
-                  val.c_str(), Color::Black);
-        y = static_cast<int16_t>(y + 36);
-    }
-}
-
-// ── лимиты + воздух (правая колонка верхнего ряда, гибкая ширина) ──
-//
-// Одна колонка с двумя рубриками, как в cockpit.html, — не два отдельных
-// места сетки: так дословно повторяется эталон. "ЛИМИТЫ" и "КАБИНЕТ · ВОЗДУХ"
-// делят между собой одну и ту же позицию верхнего эйброу колонки, если один
-// из них отсутствует, — совсем как скрытый `{% if %}`-блок не оставляет
-// пустоты в потоке документа.
-
-void draw_limit_row(Canvas& c, Rect area, const char* window_label, const Slot* s, uint32_t now,
-                    uint8_t segments) {
-    draw_text(c, fonts::Terminus14, area.x, static_cast<int16_t>(area.y + 10), window_label,
-              Color::Black, 1, /*bold=*/true);
-    String pct = format_percent(s, now);
-    // 16px — .num парного окна (Claude 5ч/неделя) в cockpit.html.
-    int16_t pw = text_width(fonts::PlexMono16, pct.c_str());
-    int16_t label_w = text_width(fonts::Terminus14, window_label);
-    int16_t bar_x = static_cast<int16_t>(area.x + label_w + 8);
-    int16_t bar_w = static_cast<int16_t>(area.w - label_w - 8 - pw - 8);
-    if (bar_w > 0) {
-        // Полоса показывает использование, число рядом — остаток: так делает
-        // интерфейс Anthropic, и так поставил владелец. Слот несёт остаток,
-        // поэтому заполнение — дополнение до ста.
-        draw_segbar(c, Rect{bar_x, area.y, bar_w, 14}, has_data(s) ? 100.0f - s->number : 0, segments);
-    }
-    draw_text(c, fonts::PlexMono16, static_cast<int16_t>(area.x + area.w - pw),
-              static_cast<int16_t>(area.y + 12), pct.c_str(), Color::Black);
-}
-
-bool co2_alarm(float v) { return v >= 1200.0f; }
-bool co2_quiet(float v) { return v < 700.0f; }
-bool tvoc_alarm(float v) { return v >= 660.0f; }
-bool tvoc_quiet(float v) { return v < 220.0f; }
-
-// "▲92/ч" — изменение в час, не в процентах (тот же Slot::delta, что и у
-// котировок, но своя единица — коннектор воздуха кладёт туда именно её).
-String format_delta_per_hour(float delta_per_hour) {
-    char buf[24];
-    const char* arrow = delta_per_hour >= 0 ? "▲" : "▼";
-    float magnitude = delta_per_hour >= 0 ? delta_per_hour : -delta_per_hour;
-    std::snprintf(buf, sizeof(buf), "%s%.0f/ч", arrow, static_cast<double>(magnitude));
-    return String(buf);
-}
-
-// Индикатор нормы — тремя разными начертаниями, как .tag/.tag.quiet/.tag.alarm
-// в cockpit.html: тревога — инверсная плашка (бросается в глаза сильнее
-// всего), норма — рамка вокруг подписи, свежо/тихо — голый текст без рамки
-// (спокойное состояние не нуждается в акценте).
-void draw_state_tag(Canvas& c, int16_t right_x, int16_t baseline_y, const char* label,
-                    bool alarm, bool quiet) {
-    int16_t tw = text_width(fonts::Terminus14, label);
-    if (alarm) {
-        constexpr int16_t kPadX = 6;
-        int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
-        int16_t x = static_cast<int16_t>(right_x - plate_w);
-        c.fill_rect(x, static_cast<int16_t>(baseline_y - 12), plate_w, 16, Color::Black);
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(x + kPadX), baseline_y, label,
-                  Color::White, 1, /*bold=*/true);
-    } else {
-        // Единый стиль для «СВЕЖО» и «НОРМА» — рамка. В эталоне спокойное
-        // состояние шло без рамки и полупрозрачным, но на однобитной панели
-        // прозрачности нет, и бейдж без обводки читался как выпавший из ряда
-        // (замечание с живого экрана). Различие несёт только тревога: она
-        // инверсная. `quiet` остаётся в сигнатуре — им решают, что писать.
-        (void) quiet;
-        constexpr int16_t kPadX = 6;
-        int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
-        int16_t x = static_cast<int16_t>(right_x - plate_w);
-        c.rect(x, static_cast<int16_t>(baseline_y - 12), plate_w, 16, Color::Black);
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(x + kPadX), baseline_y, label,
-                  Color::Black, 1, /*bold=*/true);
-    }
-}
-
-void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, const Slot* s,
-                     uint32_t now, bool (*is_alarm)(float), bool (*is_quiet)(float)) {
-    int16_t baseline = static_cast<int16_t>(area.y + 14);
-    draw_text(c, fonts::Terminus14, area.x, baseline, label, Color::Black, 1, /*bold=*/true);
-    String val = format_value(s, now, 0, "");
-    int16_t label_w = text_width(fonts::Terminus14, label);
-    int16_t value_x = static_cast<int16_t>(area.x + label_w + 8);
-    draw_text(c, fonts::PlexMono28, value_x, static_cast<int16_t>(baseline + 4), val.c_str(),
-              Color::Black);
-    int16_t vw = text_width(fonts::PlexMono28, val.c_str());
-    draw_text(c, fonts::Terminus14, static_cast<int16_t>(value_x + vw + 6),
-              static_cast<int16_t>(baseline + 4), unit, Color::Black, 1, /*bold=*/true);
-
-    if (has_data(s) && s->delta != 0.0f) {
-        String delta = format_delta_per_hour(s->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(area.x + area.w - dw), baseline,
-                  delta.c_str(), Color::Black, 1, /*bold=*/true);
-    }
-
-    if (!has_data(s)) return;
-
-    // 11/14/18 (было 13/20/12) — обмер эталона после перехода значения на
-    // PlexMono28 (docs/architecture.md, "Шрифты"): у эталона от базовой линии
-    // значения до низа блока (график + тег) 53px (reference/cockpit-reference.png,
-    // зона «воздух»), у нас с прежними отступами набегало 65 — блок упирался в
-    // нижнюю границу ряда. Высота искры (18, не 20) — тоже обмер, ближе к
-    // .num-графику эталона (svg height=18 в cockpit.html), не круглое число.
-    int16_t spark_top = static_cast<int16_t>(baseline + 11);
-    constexpr int16_t kSparkH = 18;
-    float spark[Slot::kHistoryCapacity + 1];
-    uint8_t n = build_spark(*s, spark, static_cast<uint8_t>(Slot::kHistoryCapacity + 1));
-    bool alarm = is_alarm(s->number);
-    bool quiet = !alarm && is_quiet(s->number);
-    const char* state = alarm ? "ПРОВЕТРИТЬ" : (quiet ? "СВЕЖО" : "НОРМА");
-    // График не доходит до правого края: там стоит бейдж состояния, и линия
-    // проходила прямо по нему — на живой панели «НОРМА» читалась сквозь
-    // штрих. Ширина бейджа известна заранее: текст плюс 6px полей с каждой
-    // стороны (см. draw_state_tag), плюс зазор.
-    const int16_t tag_w = static_cast<int16_t>(text_width(fonts::Terminus14, state) + 12);
-    const int16_t spark_w = static_cast<int16_t>(area.w - tag_w - 8);
-    if (spark_w > 20) {
-        draw_sparkline(c, Rect{area.x, spark_top, spark_w, kSparkH}, spark, n);
-    }
-
-    draw_state_tag(c, static_cast<int16_t>(area.x + area.w),
-                   static_cast<int16_t>(spark_top + kSparkH + 6), state, alarm, quiet);
-}
-
-void draw_limits_and_air(Canvas& c, const Store& store, const DeviceInfo& d, Rect r) {
-    const Slot* claude_5h = store.find("limit.claude.5h");
-    const Slot* claude_week = store.find("limit.claude.week");
-    const Slot* codex = store.find("limit.codex");
-    bool has_claude = has_data(claude_5h) || has_data(claude_week);
-    bool has_codex = has_data(codex);
-    bool has_limits = has_claude || has_codex;
-
-    const Slot* co2 = store.find("co2");
-    const Slot* tvoc = store.find("tvoc");
-    bool has_co2 = has_data(co2);
-    bool has_tvoc = has_data(tvoc);
-    bool has_air = has_co2 || has_tvoc;
-
-    // Эйброу текущей рубрики садится туда, куда довёл курсор y — если ЛИМИТЫ
-    // отсутствуют вовсе, КАБИНЕТ·ВОЗДУХ окажется в самом верху колонки, ровно
-    // как в потоке документа cockpit.html.
-    int16_t y = r.y;
-
-    if (has_limits) {
-        // «· ОСТАТОК» — явное указание, что число в шкале ниже показывает
-        // ОСТАТОК, а не использование (задача: слот теперь несёт
-        // remaining_percent(), не utilization — connectors.cpp).
-        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "ЛИМИТЫ · ОСТАТОК");
-        int16_t cursor = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET);
-
-        if (has_claude) {
-            int16_t title_baseline = static_cast<int16_t>(cursor + 26);
-            draw_text(c, fonts::Terminus16, r.x, title_baseline, "Claude", Color::Black, 1, /*bold=*/true);
-            const Slot* reset = store.find("limit.claude.reset");
-            if (has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus14, reset->text.c_str());
-                draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - rw),
-                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
-            }
-            int16_t bar_y = static_cast<int16_t>(title_baseline + 13);
-            int16_t half = static_cast<int16_t>((r.w - 20) / 2);
-            draw_limit_row(c, Rect{r.x, bar_y, half, 14}, "5 Ч", claude_5h, d.now, 10);
-            c.vline(static_cast<int16_t>(r.x + half + 10), bar_y, 14, Color::Black);
-            draw_limit_row(c, Rect{static_cast<int16_t>(r.x + half + 20), bar_y, half, 14},
-                           "НЕДЕЛЯ", claude_week, d.now, 10);
-            cursor = static_cast<int16_t>(bar_y + 14);
-        }
-
-        if (has_codex) {
-            int16_t title_baseline =
-                static_cast<int16_t>(cursor + (has_claude ? 27 : 26));
-            draw_text(c, fonts::Terminus16, r.x, title_baseline, "GPT", Color::Black, 1, /*bold=*/true);
-            const Slot* reset = store.find("limit.codex.reset");
-            if (has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus14, reset->text.c_str());
-                draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - rw),
-                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
-            }
-            int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
-            String pct = format_percent(codex, d.now);
-            // 20px — .num одиночного окна (GPT) в cockpit.html, крупнее
-            // парного (16px у Claude выше): в эталоне у одной строки больше
-            // свободного места по высоте, чем у половины разделённого блока.
-            int16_t pw = text_width(fonts::PlexMono20, pct.c_str());
-            int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
-            if (bar_w > 0) {
-                draw_segbar(c, Rect{r.x, bar_y, bar_w, 14}, 100.0f - codex->number,  // полоса — использование, число — остаток
-                            segments_for_width(bar_w));
-            }
-            draw_text(c, fonts::PlexMono20, static_cast<int16_t>(r.x + r.w - pw),
-                      static_cast<int16_t>(bar_y + 12), pct.c_str(), Color::Black);
-            cursor = static_cast<int16_t>(bar_y + 14);
-        }
-
-        if (has_air) {
-            int16_t hair_y = static_cast<int16_t>(cursor + 15);
-            c.hline(r.x, hair_y, r.w, Color::Black);
-            y = static_cast<int16_t>(hair_y + 10);  // -> следующий эйброу
-        } else {
-            y = cursor;  // воздуха нет — колонка заканчивается на лимитах
-        }
-    }
-
-    if (has_air) {
-        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "КАБИНЕТ · ВОЗДУХ");
-        // 26, не 20: у PlexMono28 (значение CO₂/TVOC) выносные части поднимают
-        // верхний край чернил заметно выше базовой линии, чем у прежнего
-        // Terminus24 — с прежним отступом строка значения почти касалась
-        // эйброу сверху (эталон даёт видимый зазор ~10px между ними, обмер
-        // reference/cockpit-reference.png).
-        int16_t area_y = static_cast<int16_t>(y + 26);
-        int16_t area_h = static_cast<int16_t>(r.y + r.h - area_y);
-
-        if (has_co2 && has_tvoc) {
-            int16_t half = static_cast<int16_t>((r.w - 20) / 2);
-            draw_air_metric(c, Rect{r.x, area_y, half, area_h}, "CO₂", "ppm", co2, d.now,
-                            co2_alarm, co2_quiet);
-            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 53, Color::Black);
-            draw_air_metric(c, Rect{static_cast<int16_t>(r.x + half + 20), area_y, half, area_h},
-                            "TVOC", "ppb", tvoc, d.now, tvoc_alarm, tvoc_quiet);
-        } else if (has_co2) {
-            draw_air_metric(c, Rect{r.x, area_y, r.w, area_h}, "CO₂", "ppm", co2, d.now, co2_alarm,
-                            co2_quiet);
-        } else if (has_tvoc) {
-            draw_air_metric(c, Rect{r.x, area_y, r.w, area_h}, "TVOC", "ppb", tvoc, d.now,
-                            tvoc_alarm, tvoc_quiet);
-        }
-    }
-}
-
-// ── почта (гибкая ширина, левая часть нижнего ряда) ──
-
-void draw_mail(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
-    int16_t header_baseline = static_cast<int16_t>(r.y + 12);
-    int16_t plate_w = draw_inverse_label(c, r.x, header_baseline, "ПОЧТА");
-
-    const Slot* unread = store.find("mail.unread");
-    char summary[32];
-    int count = has_data(unread) ? static_cast<int>(unread->number) : 0;
-    std::snprintf(summary, sizeof(summary), "%d НЕПРОЧИТАННЫХ", count);
-    draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + plate_w + 10), header_baseline,
-              summary, Color::Black, 1, /*bold=*/true);
-
-    constexpr int16_t kFirstRowBaseline = 45;  // от r.y — компактно, как в эталоне
-    constexpr int16_t kRowHeight = 34;
-    constexpr int16_t kSeparatorGap = 12;  // baseline -> разделитель под строкой
-    constexpr int16_t kSubjectX = 150;
-    constexpr int16_t kTimeReserve = 60;
-
-    int16_t y = static_cast<int16_t>(r.y + kFirstRowBaseline);
-    for (int i = 1; i <= 4; ++i) {
-        char from_id[24], subj_id[24], time_id[24];
-        std::snprintf(from_id, sizeof(from_id), "mail.%d.from", i);
-        std::snprintf(subj_id, sizeof(subj_id), "mail.%d.subject", i);
-        std::snprintf(time_id, sizeof(time_id), "mail.%d.time", i);
-        const Slot* from = store.find(String(from_id));
-        const Slot* subject = store.find(String(subj_id));
-        if (!has_data(from) && !has_data(subject)) continue;
-        if (y > r.y + r.h) break;
-
-        // Точка-маркер перед отправителем — как .dot в cockpit.html; здесь
-        // без чтения/непрочитанного состояния на слот (в Store такого пока
-        // нет), просто отметка «это письмо из стопки».
-        constexpr int16_t kDotSize = 5;
-        c.fill_rect(r.x, static_cast<int16_t>(y - kDotSize), kDotSize, kDotSize, Color::Black);
-        int16_t text_x = static_cast<int16_t>(r.x + kDotSize + 8);
-
-        if (has_data(from)) {
-            String label = truncate_to_width(fonts::Terminus14, from->text.c_str(),
-                                             static_cast<int16_t>(kSubjectX - kDotSize - 16));
-            draw_text(c, fonts::Terminus14, text_x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
-        }
-        if (has_data(subject)) {
-            int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - kTimeReserve);
-            String label =
-                truncate_to_width(fonts::Terminus14, subject->text.c_str(), subject_w);
-            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + kSubjectX), y,
-                      label.c_str(), Color::Black, 1, /*bold=*/true);
-        }
-        const Slot* at = store.find(String(time_id));
-        if (has_data(at)) {
-            int16_t tw = text_width(fonts::Terminus14, at->text.c_str());
-            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - tw), y,
-                      at->text.c_str(), Color::Black, 1, /*bold=*/true);
-        }
-        c.hline(r.x, static_cast<int16_t>(y + kSeparatorGap), r.w, Color::Black);
-        y = static_cast<int16_t>(y + kRowHeight);
-    }
-}
-
-// ── сегодня (фиксированная ширина, правая часть нижнего ряда) ──
-
-void draw_today(Canvas& c, const Store& store, const DeviceInfo&, Rect r) {
-    draw_eyebrow(c, r, "СЕГОДНЯ");
-    int16_t y = static_cast<int16_t>(r.y + EYEBROW_TEXT_OFFSET + 34);
-
-    const Slot* temp = store.find("weather.temp");
-    if (has_data(temp)) {
-        char buf[8];
-        std::snprintf(buf, sizeof(buf), "%+d°", static_cast<int>(temp->number));
-        draw_text(c, fonts::PlexMono28, r.x, y, buf, Color::Black);
-        int16_t tw = text_width(fonts::PlexMono28, buf);
-        const Slot* summary = store.find("weather.summary");
-        if (has_data(summary)) {
-            int16_t summary_w = static_cast<int16_t>(r.w - tw - 10);
-            String label = truncate_to_width(fonts::Terminus14, summary->text.c_str(), summary_w);
-            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + tw + 10), y, label.c_str(),
-                      Color::Black, 1, /*bold=*/true);
-        }
-        y = static_cast<int16_t>(y + 26);
-    }
-
-    for (int i = 1; i <= 3; ++i) {
-        char at_id[24], title_id[24];
-        std::snprintf(at_id, sizeof(at_id), "event.%d.at", i);
-        std::snprintf(title_id, sizeof(title_id), "event.%d.title", i);
-        const Slot* at = store.find(String(at_id));
-        const Slot* title = store.find(String(title_id));
-        if (!has_data(title)) continue;
-        if (y > r.y + r.h) break;
-
-        if (has_data(at)) {
-            // 14px — .num времени события в cockpit.html (`ev.at_label`).
-            draw_text(c, fonts::PlexMono14, r.x, y, at->text.c_str(), Color::Black);
-        }
-        String label = truncate_to_width(fonts::Terminus14, title->text.c_str(),
-                                         static_cast<int16_t>(r.w - 56));
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + 56), y, label.c_str(),
-                  Color::Black, 1, /*bold=*/true);
-        y = static_cast<int16_t>(y + 20);
-    }
 }
 
 }  // namespace
@@ -854,26 +242,6 @@ String format_value(const Slot* s, uint32_t now, int decimals, const char* suffi
     return String(buf);
 }
 
-bool rates_visible(const Store& store) {
-    return has_data(store.find("btc")) || has_data(store.find("usd_rub")) ||
-           has_data(store.find("eur_rub"));
-}
-
-bool limits_visible(const Store& store) {
-    return has_data(store.find("limit.claude.5h")) || has_data(store.find("limit.claude.week")) ||
-           has_data(store.find("limit.codex"));
-}
-
-bool air_visible(const Store& store) {
-    return has_data(store.find("co2")) || has_data(store.find("tvoc"));
-}
-
-bool mail_visible(const Store& store) { return has_data(store.find("mail.unread")); }
-
-bool today_visible(const Store& store) {
-    return has_data(store.find("weather.temp")) || has_data(store.find("event.1.title"));
-}
-
 void compute_columns(Rect row, int16_t gap, const bool* visible, uint8_t total, Rect* out) {
     uint8_t count = 0;
     for (uint8_t i = 0; i < total; ++i) {
@@ -954,24 +322,89 @@ void compute_two_rows(Rect body, int16_t gap, bool row1_has, bool row2_has, Rect
     }
 }
 
-void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device) {
+void layout_row(Rect row, int16_t gap, const std::vector<widgets::Instance>& items,
+                const std::vector<bool>& visible, Rect* out) {
+    const size_t n = items.size();
+    for (size_t i = 0; i < n; ++i) out[i] = Rect{};
+
+    size_t visible_count = 0;
+    size_t flex_count = 0;
+    int16_t fixed_sum = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (!visible[i]) continue;
+        ++visible_count;
+        if (items[i].size == widgets::Size::kFlex) {
+            ++flex_count;
+        } else {
+            fixed_sum = static_cast<int16_t>(fixed_sum + widgets::size_px(items[i].size));
+        }
+    }
+    if (visible_count == 0) return;
+
+    const int16_t gap_total = static_cast<int16_t>(gap * static_cast<int16_t>(visible_count - 1));
+
+    // Нет ни одного flex среди видимых — видимые делят весь ряд поровну
+    // (docs/widgets.md, «Правило ряда»). При visible_count==1 это отдаёт всю
+    // ширину единственному видимому — так Рынки в эталоне занимают весь
+    // верхний ряд, когда правая колонка пропала.
+    // Переполнение: фиксированные ширины (плюс минимум на каждый flex) не
+    // влезают в ряд — например три M по 296 в 770 px. Без этой ветки flex
+    // получал бы отрицательную ширину, а хвост ряда уезжал за край панели
+    // молча. Делим поровну между видимыми — кадр остаётся в границах, а
+    // владелец видит на предпросмотре и на панели одно и то же.
+    constexpr int16_t kMinFlexWidth = 120;
+    const bool overflow =
+        fixed_sum + gap_total + static_cast<int16_t>(flex_count) * kMinFlexWidth > row.w;
+    const bool equal_split = flex_count == 0 || overflow;
+
+    int16_t equal_w = 0;
+    int16_t flex_w = 0;
+    if (equal_split) {
+        equal_w = static_cast<int16_t>((row.w - gap_total) / static_cast<int16_t>(visible_count));
+    } else {
+        const int16_t remaining = static_cast<int16_t>(row.w - fixed_sum - gap_total);
+        flex_w = static_cast<int16_t>(remaining / static_cast<int16_t>(flex_count));
+    }
+
+    int16_t cursor = row.x;
+    for (size_t i = 0; i < n; ++i) {
+        if (!visible[i]) continue;
+        const int16_t w = equal_split ? equal_w
+                          : items[i].size == widgets::Size::kFlex
+                              ? flex_w
+                              : widgets::size_px(items[i].size);
+        out[i] = Rect{cursor, row.y, w, row.h};
+        cursor = static_cast<int16_t>(cursor + w + gap);
+    }
+}
+
+void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
+                const config::Dashboard& dashboard) {
     canvas.fill(Color::White);
     draw_header(canvas, device);
 
     Rect body{MARGIN, BODY_TOP, static_cast<int16_t>(canvas.width() - 2 * MARGIN),
               static_cast<int16_t>(canvas.height() - BODY_TOP - MARGIN)};
 
-    bool rates_ok = rates_visible(store);
-    bool combined_ok = limits_visible(store) || air_visible(store);
-    bool mail_ok = mail_visible(store);
-    bool today_ok = today_visible(store);
-    bool row1_has = rates_ok || combined_ok;
-    bool row2_has = mail_ok || today_ok;
+    // Видимость каждого инстанса — по его widgets::Spec::visible: раскладка
+    // не знает имён слотов, только у кого спросить.
+    std::vector<bool> visible[2];
+    bool row_has[2] = {false, false};
+    for (int r = 0; r < 2; ++r) {
+        const std::vector<widgets::Instance>& items = dashboard.rows[r];
+        visible[r].assign(items.size(), false);
+        for (size_t i = 0; i < items.size(); ++i) {
+            const widgets::Spec* spec = widgets::find(items[i].type.c_str());
+            const bool v = spec != nullptr && spec->visible(store, items[i]);
+            visible[r][i] = v;
+            if (v) row_has[r] = true;
+        }
+    }
 
     Rect row1, row2;
-    compute_two_rows(body, ROW_GAP, row1_has, row2_has, &row1, &row2);
+    compute_two_rows(body, ROW_GAP, row_has[0], row_has[1], &row1, &row2);
 
-    if (row1_has && row2_has) {
+    if (row_has[0] && row_has[1]) {
         // Разделитель садится на границу рядов, а не в середину зазора — в
         // эталоне зазор целиком идёт ПОСЛЕ линии (298→310 у div, а не по 6px
         // с обеих сторон).
@@ -980,28 +413,30 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device) {
         canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h + 1), rule_w, Color::Black);
     }
 
-    if (row1_has) {
-        Rect rates_col, combined_col;
-        compute_columns_fixed_first(row1, TOP_GAP, rates_ok, combined_ok, RATES_WIDTH, &rates_col,
-                                     &combined_col);
-        if (rates_ok) draw_rates(canvas, store, device, rates_col);
-        if (combined_ok) draw_limits_and_air(canvas, store, device, combined_col);
-        // Разделителя между Рынками и правой колонкой в эталоне нет (только
-        // зазор) — в отличие от CO₂|TVOC и Почта|Сегодня, где вертикальная
-        // линия есть. compare_frame.py это подтверждает: единственные найденные
-        // вертикальные линии — x=557 (внутри Воздуха) и x=567 (Почта|Сегодня).
-    }
-    if (row2_has) {
-        Rect mail_col, today_col;
-        compute_columns_fixed_second(row2, BOTTOM_GAP, mail_ok, today_ok, TODAY_WIDTH, &mail_col,
-                                      &today_col);
-        if (mail_ok) draw_mail(canvas, store, device, mail_col);
-        if (today_ok) draw_today(canvas, store, device, today_col);
-        if (mail_ok && today_ok) {
-            canvas.vline(static_cast<int16_t>(today_col.x - BOTTOM_GAP + 2), row2.y, row2.h,
-                         Color::Black);
-            canvas.vline(static_cast<int16_t>(today_col.x - BOTTOM_GAP + 1), row2.y, row2.h,
-                         Color::Black);
+    const int16_t row_gap[2] = {TOP_GAP, BOTTOM_GAP};
+    const Rect rows[2] = {row1, row2};
+    for (int r = 0; r < 2; ++r) {
+        if (!row_has[r]) continue;
+        const std::vector<widgets::Instance>& items = dashboard.rows[r];
+        std::vector<Rect> rects(items.size());
+        layout_row(rows[r], row_gap[r], items, visible[r], rects.data());
+
+        bool drawn_any = false;
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (!visible[r][i]) continue;
+            const widgets::Instance& item = items[i];
+            if (item.divider && drawn_any) {
+                // Вертикальная линия 2px в зазоре слева от виджета — тот же
+                // приём, что раньше был жёстко зашит для Сегодня (два
+                // соседних vline вместо толщины линии в canvas).
+                const int16_t x2 = static_cast<int16_t>(rects[i].x - row_gap[r] + 2);
+                const int16_t x1 = static_cast<int16_t>(rects[i].x - row_gap[r] + 1);
+                canvas.vline(x2, rows[r].y, rows[r].h, Color::Black);
+                canvas.vline(x1, rows[r].y, rows[r].h, Color::Black);
+            }
+            const widgets::Spec* spec = widgets::find(item.type.c_str());
+            if (spec != nullptr) spec->draw(canvas, store, device, rects[i], item);
+            drawn_any = true;
         }
     }
 }
@@ -1054,15 +489,15 @@ void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& passw
     // (используется для курсов и процентов) — букв SSID/пароля в нём просто
     // нет, глиф молча не рисуется (font.h: find_glyph возвращает nullptr, а
     // draw_text пропускает символ). Terminus покрывает весь ASCII.
-    draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "СЕТЬ");
-    y = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET + 34);
+    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "СЕТЬ");
+    y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 34);
     draw_text(canvas, fonts::Terminus24, MARGIN, y,
-              truncate_to_width(fonts::Terminus24, ssid.c_str(), text_w).c_str(), Color::Black, 1,
-              /*bold=*/true);
+              widgets::prims::truncate_to_width(fonts::Terminus24, ssid.c_str(), text_w).c_str(),
+              Color::Black, 1, /*bold=*/true);
 
     y = static_cast<int16_t>(y + 50);
-    draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "ПАРОЛЬ");
-    y = static_cast<int16_t>(y + EYEBROW_TEXT_OFFSET + 56);
+    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "ПАРОЛЬ");
+    y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 56);
     // Terminus24 при scale=2 — тот же приём, что курс BTC в блоке Рынков
     // (см. font.h про kern 48 без пятого файла шрифта): пароль должен быть
     // зрительно доминирующим, чтобы его можно было перепечатать со стола без

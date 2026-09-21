@@ -99,14 +99,15 @@ void refresh_full() {
 }
 
 
-void show_frame(const slots::Store& store, const layout::DeviceInfo& device) {
+void show_frame(const slots::Store& store, const layout::DeviceInfo& device,
+                const config::Dashboard& dashboard) {
     // Частичное обновление: полное моргает всем экраном около секунды, а этот
     // кадр перерисовывается часто.
     epd.setPartialWindow(0, 0, board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
     canvas::CanvasGxEPD2<Panel> canvas(epd);
     epd.firstPage();
     do {
-        layout::draw_frame(canvas, store, device);
+        layout::draw_frame(canvas, store, device, dashboard);
     } while (epd.nextPage());
 }
 

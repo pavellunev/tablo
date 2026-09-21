@@ -7,6 +7,7 @@
 
 #include <Arduino.h>
 
+#include "config.h"
 #include "layout.h"
 #include "slots.h"
 
@@ -17,11 +18,11 @@ void begin();
 // Тестовый кадр фазы 0: проверяем шрифт, линии и заливку на живой панели.
 void show_boot_screen();
 
-// Кадр раскладки (фаза 3): шапка + пересобранная сетка блоков, тем же
-// движком, что и tools/render_frame на хосте, — canvas_gxepd2.h оборачивает
-// ту же панель в layout::draw_frame() без дублирования логики отрисовки.
-// Заменяет служебный кадр фаз 0-2 (список слотов без вёрстки).
-void show_frame(const slots::Store& store, const layout::DeviceInfo& device);
+// Кадр раскладки: шапка + активный дашборд, тем же движком, что и
+// tools/render_frame на хосте, — canvas_gxepd2.h оборачивает ту же панель в
+// layout::draw_frame() без дублирования логики отрисовки.
+void show_frame(const slots::Store& store, const layout::DeviceInfo& device,
+                 const config::Dashboard& dashboard);
 
 // Полное обновление — раз в сутки и после долгой череды частичных, чтобы
 // убрать остаточное изображение.

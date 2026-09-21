@@ -8,7 +8,9 @@
 #include <unity.h>
 
 #include <cstring>
+#include <string>
 
+#include "../../src/widgets/types.cpp"  // config.cpp зовёт widgets::find_type/size_*
 #include "../../src/config.cpp"
 
 void setUp() {}
@@ -452,6 +454,252 @@ static void test_merge_missing_factory_connectors_keeps_user_edited_connector() 
     }
 }
 
+// ── секрет не переезжает на новый адрес (docs/decisions.md, п.8) ──
+//
+// Запись настроек разрешена из любой сети, где устройство оказалось. Пустое
+// поле токена по-прежнему значит «не трогали» — но только пока адрес тот же:
+// иначе чужой в гостиничной сети присылал бы коннектор со своим адресом и
+// получал бы сохранённый токен от устройства собственноручно.
+
+static config::Settings settings_with_home(const char* url, bool insecure) {
+    config::Settings settings;
+    config::Connector conn;
+    conn.id = "home";
+    conn.kind = "homeassistant";
+    conn.url = url;
+    conn.token = "ha-secret";
+    conn.refresh_token = "refresh-secret";
+    conn.username = "user@example.com";
+    conn.insecure = insecure;
+    settings.connectors.push_back(conn);
+    return settings;
+}
+
+static void test_from_json_same_target_without_token_keeps_all_secrets() {
+    config::Settings settings = settings_with_home("http://ha.local:8123", false);
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"homeassistant\","
+        "\"url\":\"http://ha.local:8123\",\"insecure\":false}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_EQUAL_STRING("ha-secret", settings.connectors[0].token.c_str());
+    TEST_ASSERT_EQUAL_STRING("refresh-secret", settings.connectors[0].refresh_token.c_str());
+    TEST_ASSERT_EQUAL_STRING("user@example.com", settings.connectors[0].username.c_str());
+}
+
+static void test_from_json_url_change_without_token_drops_secrets() {
+    config::Settings settings = settings_with_home("http://ha.local:8123", false);
+    // Тот же id, чужой адрес, пустые секреты — ровно запрос атакующего.
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"homeassistant\","
+        "\"url\":\"http://10.0.0.13:8123\"}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_EQUAL_STRING("http://10.0.0.13:8123", settings.connectors[0].url.c_str());
+    TEST_ASSERT_EQUAL_STRING("", settings.connectors[0].token.c_str());
+    TEST_ASSERT_EQUAL_STRING("", settings.connectors[0].refresh_token.c_str());
+    TEST_ASSERT_EQUAL_STRING("", settings.connectors[0].username.c_str());
+}
+
+static void test_from_json_url_change_with_token_takes_new_token() {
+    config::Settings settings = settings_with_home("http://ha.local:8123", false);
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"homeassistant\","
+        "\"url\":\"http://10.0.0.13:8123\",\"token\":\"new-secret\"}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_EQUAL_STRING("new-secret", settings.connectors[0].token.c_str());
+}
+
+static void test_from_json_enabling_insecure_without_token_drops_secret() {
+    config::Settings settings = settings_with_home("https://ha.local:8123", false);
+    // Адрес тот же, но проверку сертификата выключили: в чужой сети это
+    // адрес подменяется DNS-ом — токен на такую цель не наследуется.
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"homeassistant\","
+        "\"url\":\"https://ha.local:8123\",\"insecure\":true}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_TRUE(settings.connectors[0].insecure);
+    TEST_ASSERT_EQUAL_STRING("", settings.connectors[0].token.c_str());
+}
+
+static void test_from_json_disabling_insecure_without_token_keeps_secret() {
+    config::Settings settings = settings_with_home("https://ha.local:8123", true);
+    // Обратное направление безопаснее прежнего — секрет остаётся.
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"homeassistant\","
+        "\"url\":\"https://ha.local:8123\",\"insecure\":false}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_EQUAL_STRING("ha-secret", settings.connectors[0].token.c_str());
+}
+
+// ── дашборды (docs/widgets.md): round-trip, валидация при разборе формы ──
+
+static config::Dashboard dashboard_with_one_widget() {
+    config::Dashboard db;
+    db.name = "Мой";
+    widgets::Instance markets;
+    markets.type = "markets";
+    markets.size = widgets::Size::kM;
+    db.rows[0].push_back(markets);
+    widgets::Instance today;
+    today.type = "today";
+    today.size = widgets::Size::kS;
+    today.divider = true;
+    today.label = "Погода";
+    db.rows[1].push_back(today);
+    return db;
+}
+
+static void test_dashboard_round_trip_keeps_widgets() {
+    config::Settings settings;
+    settings.dashboards.push_back(dashboard_with_one_widget());
+    settings.dashboards.push_back(config::Dashboard{});
+    settings.dashboards.push_back(config::Dashboard{});
+    settings.active_dashboard = 0;
+
+    String raw = config::to_json(settings, /*include_secrets=*/true);
+    config::Settings loaded;
+    TEST_ASSERT_TRUE(config::from_json(raw, loaded));
+
+    TEST_ASSERT_EQUAL(3, loaded.dashboards.size());
+    TEST_ASSERT_EQUAL_STRING("Мой", loaded.dashboards[0].name.c_str());
+    TEST_ASSERT_EQUAL(1, loaded.dashboards[0].rows[0].size());
+    TEST_ASSERT_EQUAL_STRING("markets", loaded.dashboards[0].rows[0][0].type.c_str());
+    TEST_ASSERT_TRUE(widgets::Size::kM == loaded.dashboards[0].rows[0][0].size);
+    TEST_ASSERT_EQUAL(1, loaded.dashboards[0].rows[1].size());
+    TEST_ASSERT_TRUE(loaded.dashboards[0].rows[1][0].divider);
+    TEST_ASSERT_EQUAL_STRING("Погода", loaded.dashboards[0].rows[1][0].label.c_str());
+}
+
+static void test_from_json_missing_dashboards_keeps_previous() {
+    config::Settings settings;
+    settings.dashboards.push_back(dashboard_with_one_widget());
+    settings.dashboards.push_back(config::Dashboard{});
+    settings.dashboards.push_back(config::Dashboard{});
+
+    String payload = "{}";
+    config::from_json(payload, settings);
+
+    TEST_ASSERT_EQUAL(3, settings.dashboards.size());
+    TEST_ASSERT_EQUAL_STRING("Мой", settings.dashboards[0].name.c_str());
+}
+
+static void test_from_json_extra_dashboard_dropped() {
+    config::Settings settings;
+    String payload =
+        "{\"dashboards\":["
+        "{\"name\":\"A\",\"rows\":[[],[]]},"
+        "{\"name\":\"B\",\"rows\":[[],[]]},"
+        "{\"name\":\"C\",\"rows\":[[],[]]},"
+        "{\"name\":\"D\",\"rows\":[[],[]]}"
+        "]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_EQUAL(3, settings.dashboards.size());
+    TEST_ASSERT_EQUAL_STRING("A", settings.dashboards[0].name.c_str());
+    TEST_ASSERT_EQUAL_STRING("C", settings.dashboards[2].name.c_str());
+}
+
+static void test_from_json_fewer_than_three_dashboards_padded_empty() {
+    config::Settings settings;
+    String payload = "{\"dashboards\":[{\"name\":\"A\",\"rows\":[[],[]]}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_EQUAL(3, settings.dashboards.size());
+    TEST_ASSERT_EQUAL_STRING("", settings.dashboards[1].name.c_str());
+    TEST_ASSERT_EQUAL_STRING("", settings.dashboards[2].name.c_str());
+}
+
+static void test_from_json_unknown_widget_type_is_dropped() {
+    config::Settings settings;
+    String payload =
+        "{\"dashboards\":[{\"name\":\"A\",\"rows\":[[{\"type\":\"bogus\",\"size\":\"S\"},"
+        "{\"type\":\"markets\",\"size\":\"M\"}],[]]}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_EQUAL(1, settings.dashboards[0].rows[0].size());
+    TEST_ASSERT_EQUAL_STRING("markets", settings.dashboards[0].rows[0][0].type.c_str());
+}
+
+static void test_from_json_unknown_size_falls_back_to_widget_default() {
+    config::Settings settings;
+    // mail — default_size flex (widgets/types.cpp); "wat" не входит в S/M/flex.
+    String payload =
+        "{\"dashboards\":[{\"name\":\"A\",\"rows\":[[{\"type\":\"mail\",\"size\":\"wat\"}],[]]}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_TRUE(widgets::Size::kFlex == settings.dashboards[0].rows[0][0].size);
+}
+
+static void test_from_json_too_many_widgets_in_row_are_dropped() {
+    config::Settings settings;
+    std::string payload_str = "{\"dashboards\":[{\"name\":\"A\",\"rows\":[[";
+    for (int i = 0; i < 8; ++i) {
+        if (i) payload_str += ",";
+        payload_str += "{\"type\":\"text\",\"label\":\"x\"}";
+    }
+    payload_str += "],[]]}]}";
+    String payload(payload_str.c_str());
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    // Не больше 6 виджетов в ряду — остальные молча отброшены.
+    TEST_ASSERT_EQUAL(6, settings.dashboards[0].rows[0].size());
+}
+
+static void test_from_json_active_dashboard_out_of_range_resets_to_zero() {
+    config::Settings settings;
+    // 3 — первое недопустимое значение (валидный диапазон 0..2, дашбордов
+    // всегда ровно три): граница, а не запасом, иначе мутация «> 2» -> «> 3»
+    // прошла бы тестом с большим числом незамеченной.
+    String payload = "{\"active_dashboard\":3}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_EQUAL(0, settings.active_dashboard);
+}
+
+static void test_from_json_active_dashboard_in_range_is_kept() {
+    config::Settings settings;
+    String payload = "{\"active_dashboard\":2}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+
+    TEST_ASSERT_EQUAL(2, settings.active_dashboard);
+}
+
+static void test_to_json_omits_default_divider_slot_and_label() {
+    config::Settings settings;
+    config::Dashboard db;
+    widgets::Instance plain;
+    plain.type = "markets";
+    plain.size = widgets::Size::kM;
+    db.rows[0].push_back(plain);
+    settings.dashboards.push_back(db);
+    settings.dashboards.push_back(config::Dashboard{});
+    settings.dashboards.push_back(config::Dashboard{});
+
+    String json = config::to_json(settings, /*include_secrets=*/false);
+
+    // Компактность — потолок NVS ≈ 8 КБ (config.cpp, save()): поля со
+    // значением по умолчанию не должны раздувать JSON.
+    TEST_ASSERT_NULL(strstr(json.c_str(), "\"divider\""));
+    TEST_ASSERT_NULL(strstr(json.c_str(), "\"slot\""));
+    TEST_ASSERT_NULL(strstr(json.c_str(), "\"label\""));
+}
+
+static void test_to_json_defaults_stays_under_nvs_ceiling() {
+    // Потолок NVS ≈ 8 КБ (config.cpp, save()) — три заводских дашборда не
+    // должны вытолкнуть JSON настроек за границу вместе с токенами.
+    String json = config::to_json(config::defaults(), /*include_secrets=*/true);
+    TEST_ASSERT_TRUE(json.length() < 7000);
+}
+
+static void test_from_json_kind_change_without_token_drops_secret() {
+    config::Settings settings = settings_with_home("http://ha.local:8123", false);
+    // Адрес тот же, протокол другой — секрет ушёл бы другим путём.
+    String payload =
+        "{\"connectors\":[{\"id\":\"home\",\"kind\":\"http\","
+        "\"url\":\"http://ha.local:8123\"}]}";
+    TEST_ASSERT_TRUE(config::from_json(payload, settings));
+    TEST_ASSERT_EQUAL_STRING("", settings.connectors[0].token.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -484,6 +732,24 @@ int main() {
     RUN_TEST(test_merge_missing_factory_connectors_adds_new_by_id);
     RUN_TEST(test_merge_missing_factory_connectors_replaces_changed_kind);
     RUN_TEST(test_merge_missing_factory_connectors_keeps_user_edited_connector);
+    RUN_TEST(test_from_json_same_target_without_token_keeps_all_secrets);
+    RUN_TEST(test_from_json_url_change_without_token_drops_secrets);
+    RUN_TEST(test_from_json_url_change_with_token_takes_new_token);
+    RUN_TEST(test_from_json_enabling_insecure_without_token_drops_secret);
+    RUN_TEST(test_from_json_disabling_insecure_without_token_keeps_secret);
+    RUN_TEST(test_from_json_kind_change_without_token_drops_secret);
+
+    RUN_TEST(test_dashboard_round_trip_keeps_widgets);
+    RUN_TEST(test_from_json_missing_dashboards_keeps_previous);
+    RUN_TEST(test_from_json_extra_dashboard_dropped);
+    RUN_TEST(test_from_json_fewer_than_three_dashboards_padded_empty);
+    RUN_TEST(test_from_json_unknown_widget_type_is_dropped);
+    RUN_TEST(test_from_json_unknown_size_falls_back_to_widget_default);
+    RUN_TEST(test_from_json_too_many_widgets_in_row_are_dropped);
+    RUN_TEST(test_from_json_active_dashboard_out_of_range_resets_to_zero);
+    RUN_TEST(test_from_json_active_dashboard_in_range_is_kept);
+    RUN_TEST(test_to_json_omits_default_divider_slot_and_label);
+    RUN_TEST(test_to_json_defaults_stays_under_nvs_ceiling);
 
     return UNITY_END();
 }

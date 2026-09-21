@@ -104,6 +104,7 @@
     border-color: var(--danger);
     color: var(--danger);
   }
+  button:disabled { opacity: 0.4; cursor: default; }
   button:active { opacity: 0.75; }
   button.full { width: 100%; margin-top: 4px; }
   input, select {
@@ -151,17 +152,11 @@
     margin-top: 8px;
   }
   .checkbox-row input { width: auto; margin-top: 2px; }
+  .checkbox-row.inline { align-items: center; margin: 0; }
+  .checkbox-row.inline input { margin-top: 0; }
   .warning {
     color: var(--danger);
     font-size: 12px;
-  }
-  .readonly-banner {
-    background: #fff7ea;
-    border: 1px solid #e2c98a;
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    font-size: 14px;
   }
   footer {
     position: fixed;
@@ -189,6 +184,51 @@
     color: var(--muted);
     min-height: 16px;
   }
+
+  /* Экраны */
+  .canvas-wrap { margin-bottom: 12px; }
+  #preview-canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab-btn {
+    flex: 1;
+    min-width: 90px;
+    padding: 8px 10px;
+    min-height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .tab-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .dash-row { margin-top: 16px; }
+  .dash-row h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .widget-list { display: flex; flex-direction: column; gap: 10px; }
+  .widget-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+  .widget-item .row { border-bottom: none; padding: 0 0 6px; }
+  .widget-item-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+  .widget-item-move { display: flex; gap: 6px; flex-wrap: wrap; }
+  .widget-item-move button { flex: 1; min-width: 60px; }
+  .source-status { margin: 6px 0 0; font-size: 13px; }
+  .source-status.ok { color: var(--muted); }
+  .source-status.missing { color: var(--danger); cursor: pointer; text-decoration: underline; }
+  .palette { border: 1px dashed var(--border); border-radius: 10px; padding: 10px; margin-top: 8px; }
+  .add-form { border: 1px dashed var(--border); border-radius: 8px; padding: 10px; margin-top: 8px; }
+  .add-form select, .add-form input { margin-top: 6px; }
+
+  /* Источники */
+  .source-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .source-card h3 { margin: 0 0 4px; font-size: 15px; }
+  .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -198,11 +238,6 @@
 </header>
 
 <main>
-  <div id="readonly-banner" class="readonly-banner" hidden>
-    Настройки можно изменить только подключившись к точке доступа самого
-    устройства — её имя и пароль показаны на экране. Из этой сети форма
-    доступна только для чтения.
-  </div>
 
   <section id="wifi-section">
     <h2>Сеть</h2>
@@ -219,41 +254,86 @@
     </div>
   </section>
 
-  <section id="connectors-section">
-    <h2>Коннекторы</h2>
-    <div id="connector-list"><p class="empty">коннекторов нет</p></div>
-    <div class="preset-row">
-      <button type="button" class="secondary" data-preset="homeassistant">Умный дом</button>
-      <button type="button" class="secondary" data-preset="rates">Курсы валют</button>
-      <button type="button" class="secondary" data-preset="custom">Свой источник</button>
-    </div>
+  <section id="dashboards-section">
+    <h2>Экраны</h2>
+    <div class="canvas-wrap"><canvas id="preview-canvas" width="800" height="480"></canvas></div>
+    <div id="dashboards-box"><p class="empty">загрузка…</p></div>
+  </section>
+
+  <section id="sources-section">
+    <h2>Источники</h2>
+    <div id="sources-list"></div>
+    <details>
+      <summary>дополнительно</summary>
+      <div id="custom-connectors"></div>
+      <button type="button" class="secondary full" id="add-custom-connector">+ добавить источник</button>
+    </details>
   </section>
 
   <section id="device-section">
     <h2>Устройство</h2>
-    <label>Имя устройства (точки доступа)
+    <label>Имя устройства
       <input id="device-name" type="text" placeholder="inkroam-setup">
     </label>
-    <label>Город (погода и часовой пояс)
-      <input id="device-city" type="text" placeholder="Екатеринбург">
-    </label>
-    <p id="city-hint" class="empty"></p>
+    <p class="empty" id="device-name-hint"></p>
   </section>
 
 </main>
 
 <p id="status"></p>
 <footer>
-  <button type="button" id="save-btn">Сохранить</button>
+  <button type="button" id="save-btn" disabled>Сохранить</button>
   <button type="button" class="secondary" id="reboot-btn">Перезагрузить</button>
 </footer>
 
 <script>
 'use strict';
 
+// Известные слоты — то, что реально умеет показывать кадр устройства.
+// Используются и в мастере добавления показателя (metric), и в ручной
+// привязке датчиков/своих источников.
+var SLOTS = [
+  ['btc', 'Курс BTC'], ['usd_rub', 'Доллар'], ['eur_rub', 'Евро'],
+  ['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура'],
+  ['limit.claude.5h', 'Claude, 5 часов'], ['limit.claude.week', 'Claude, неделя'],
+  ['limit.codex', 'GPT'], ['mail.unread', 'Непрочитанных писем']
+];
+
+// Заводские коннекторы: id/kind фиксированы прошивкой (config.cpp,
+// defaults()) — карточки источников привязаны к ним по id, а не создаются
+// произвольно. Если коннектора нет в ответе устройства (прошивка ещё не
+// умеет его, либо владелец сам удалил из NVS раньше) — страница создаёт
+// заглушку сама, и он появится при первом же сохранении формы.
+var FACTORY_STUBS = [
+  { id: 'claude', kind: 'anthropic' }, { id: 'codex', kind: 'codex' },
+  { id: 'mail', kind: 'imap' }, { id: 'home', kind: 'homeassistant' },
+  { id: 'btc', kind: 'http' }, { id: 'btc_history', kind: 'http' }, { id: 'fiat', kind: 'http' },
+  { id: 'weather', kind: 'weather' }, { id: 'geocode', kind: 'geocode' }
+];
+var FACTORY_IDS = {};
+FACTORY_STUBS.forEach(function (s) { FACTORY_IDS[s.id] = true; });
+function isFactoryId(id) { return !!FACTORY_IDS[id]; }
+
+// Карточки источников на странице: к какому(им) коннектору(ам) привязана
+// карточка, по какому слоту показывать «обновлено N мин назад», и всегда ли
+// она считается настроенной (Курсы и Погода — публичные API без ключа).
+var SOURCE_CARDS = [
+  { key: 'claude', title: 'Claude', connIds: ['claude'], firstSlot: 'limit.claude.5h', always: false },
+  { key: 'codex', title: 'Codex', connIds: ['codex'], firstSlot: 'limit.codex', always: false },
+  { key: 'mail', title: 'Почта', connIds: ['mail'], firstSlot: 'mail.unread', always: false },
+  { key: 'home', title: 'Умный дом', connIds: ['home'], firstSlot: 'co2', always: false },
+  { key: 'rates', title: 'Курсы', connIds: ['btc', 'btc_history', 'fiat'], firstSlot: 'btc', always: true },
+  { key: 'weather', title: 'Погода и часовой пояс', connIds: ['weather', 'geocode'], firstSlot: 'weather.temp', always: true }
+];
+
 var state = {
+  loaded: false,  // /api/config прочитан успешно — только тогда «Сохранить» активна
   device_name: '', timezone_minutes: 0, city: '', city_resolved: '', city_lat: 0, city_lon: 0,
-  networks: [], connectors: [], canWrite: true
+  networks: [], connectors: [], connectorOrig: {},
+  dashboardsSupported: false, dashboards: [], activeDashboard: 0, currentTab: 0,
+  paletteRow: null, paletteSubType: null, addSensorOpen: false,
+  widgetsCatalog: [], widgetsByType: {},
+  status: null
 };
 var pendingSsid = null;
 var pendingSecure = false;
@@ -278,50 +358,604 @@ function fetchJSON(url, options) {
   });
 }
 
-function loadConfig() {
-  return fetchJSON('/api/config').then(function (cfg) {
-    state.device_name = cfg.device_name || '';
-    state.timezone_minutes = cfg.timezone_minutes || 0;
-    state.city = cfg.city || '';
-    state.city_resolved = cfg.city_resolved || '';
-    state.city_lat = cfg.city_lat || 0;
-    state.city_lon = cfg.city_lon || 0;
-    // can_write — решает устройство по интерфейсу, с которого пришёл этот
-    // самый запрос (docs/decisions.md, п.8): страница не гадает по другим
-    // признакам, а просто верит ответу.
-    state.canWrite = !!cfg.can_write;
-    el('readonly-banner').hidden = state.canWrite;
-    el('save-btn').disabled = !state.canWrite;
-    el('reboot-btn').disabled = !state.canWrite;
-    state.networks = (cfg.networks || []).map(function (n) {
-      return { ssid: n.ssid, password: '', password_set: !!n.password_set };
-    });
-    state.connectors = (cfg.connectors || []).map(function (c) {
-      return {
-        id: c.id, kind: c.kind || 'http', url: c.url || '',
-        interval: c.interval || 300, token: '', token_set: !!c.token_set,
-        insecure: !!c.insecure
-      };
-    });
-    el('device-name').value = state.device_name;
-    el('device-city').value = state.city;
-    // Координаты определяются геокодингом на самом устройстве при первом
-    // выходе в сеть (docs/constructor.md, «Тонкость») — пока city не
-    // совпадает с city_resolved, честно пишем, что ждать, а не показываем
-    // 0.0000 как будто это настоящие координаты.
-    if (state.city && state.city !== state.city_resolved) {
-      el('city-hint').textContent = 'координаты определятся при подключении к сети';
-    } else if (state.city_lat || state.city_lon) {
-      el('city-hint').textContent = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
-    } else {
-      el('city-hint').textContent = '';
-    }
-    renderNetworks();
-    renderConnectors();
-  }).catch(function (e) {
-    setStatus('не удалось загрузить настройки: ' + e.message);
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
+function escapeAttr(s) { return escapeHtml(s); }
+
+function conn(id) {
+  return state.connectors.find(function (c) { return c.id === id; });
+}
+
+// Заводской коннектор без ответа устройства — не повод падать: страница
+// заводит его заглушкой (пустые поля, ничего не «задано»), а реальным он
+// станет при первом сохранении формы, потому что payload шлёт ВСЕ коннекторы.
+function ensureFactoryConnectors() {
+  FACTORY_STUBS.forEach(function (stub) {
+    if (conn(stub.id)) return;
+    state.connectors.push({
+      id: stub.id, kind: stub.kind, url: '', interval: 300,
+      token: '', token_set: false, refresh_token: '', refresh_token_set: false,
+      username: '', username_set: false, insecure: false, map: []
+    });
+  });
+}
+
+function tokenPlaceholder(isSet) {
+  return isSet ? 'задан · оставьте пустым, чтобы не менять' : 'не задан';
+}
+
+function sensorRole(slot) {
+  if (slot === 'co2') return 'CO₂';
+  if (slot === 'tvoc') return 'TVOC';
+  return slot;
+}
+
+// ── карточки источников: состояние и правило «какая карточка нужна слоту» ──
+
+function sourceCardByKey(key) {
+  for (var i = 0; i < SOURCE_CARDS.length; i++) {
+    if (SOURCE_CARDS[i].key === key) return SOURCE_CARDS[i];
+  }
+  return null;
+}
+function cardTitleByKey(key) {
+  var c = sourceCardByKey(key);
+  return c ? c.title : key;
+}
+
+// Правило из плана: limit.claude*→Claude, limit.codex*→Codex, mail.*→Почта,
+// co2/tvoc→Умный дом, btc/usd_rub/eur_rub→Курсы, weather.*→Погода. Слот вне
+// этого списка (свой источник) требования к карточке не несёт.
+function slotSourceCard(slot) {
+  if (slot.indexOf('limit.claude') === 0) return 'claude';
+  if (slot.indexOf('limit.codex') === 0) return 'codex';
+  if (slot.indexOf('mail.') === 0) return 'mail';
+  if (slot === 'co2' || slot === 'tvoc') return 'home';
+  if (slot === 'btc' || slot === 'usd_rub' || slot === 'eur_rub') return 'rates';
+  if (slot.indexOf('weather.') === 0) return 'weather';
+  return null;
+}
+
+// «Настроен» = у коннектора карточки задан token (для Курсов и Погоды —
+// всегда, это публичные API без ключа).
+function isCardConfigured(key) {
+  var card = sourceCardByKey(key);
+  if (!card) return true;
+  if (card.always) return true;
+  var c = conn(card.connIds[0]);
+  return !!(c && c.token_set);
+}
+
+function slotInfo(name) {
+  return (state.status && state.status.slots && state.status.slots[name]) || null;
+}
+
+// Слот `<id>.status` с непустым error — явная ошибка источника, показываем
+// её текстом; иначе — «обновлено N мин назад» по первому слоту источника,
+// либо «данных ещё нет», если слот ни разу не наполнялся.
+function computeSourceCardStatus(card) {
+  for (var i = 0; i < card.connIds.length; i++) {
+    var s = slotInfo(card.connIds[i] + '.status');
+    if (s && s.error) return { error: true, text: s.error };
+  }
+  var fs = slotInfo(card.firstSlot);
+  if (!fs) return { error: false, text: 'данных ещё нет' };
+  var mins = Math.max(0, Math.round((fs.age || 0) / 60));
+  return { error: false, text: 'обновлено ' + mins + ' мин назад' };
+}
+
+function statusLineHtml(key) {
+  var card = sourceCardByKey(key);
+  var st = computeSourceCardStatus(card);
+  var cls = st.error ? 'warning' : 'meta';
+  return '<p class="' + cls + '" id="status-line-' + key + '">' + escapeHtml(st.text) + '</p>';
+}
+
+// Периодическое обновление (каждые 10с) — точечно, без перестройки DOM:
+// иначе набираемый текст в полях формы терял бы фокус и курсор.
+function updateStatusLines() {
+  SOURCE_CARDS.forEach(function (card) {
+    var lineEl = document.getElementById('status-line-' + card.key);
+    if (!lineEl) return;
+    var st = computeSourceCardStatus(card);
+    lineEl.textContent = st.text;
+    lineEl.className = st.error ? 'warning' : 'meta';
+  });
+}
+
+// «Адрес изменился — токен не наследуется» (config.cpp, target_unchanged):
+// подсказка обновляется точечно по каждому нажатию клавиши, без перерисовки
+// всей карточки.
+function updateChangedHint(id) {
+  var hintEl = document.getElementById('hint-changed-' + id);
+  if (!hintEl) return;
+  var c = conn(id);
+  var orig = state.connectorOrig[id];
+  if (!c || !orig) { hintEl.hidden = true; return; }
+  var changed = (c.url !== orig.url) || (c.insecure && !orig.insecure);
+  hintEl.hidden = !changed;
+}
+function updateAllChangedHints() {
+  state.connectors.forEach(function (c) { updateChangedHint(c.id); });
+}
+
+function updateCityHint() {
+  var hintEl = document.getElementById('city-hint');
+  if (!hintEl) return;
+  var text = '';
+  if (state.city && state.city !== state.city_resolved) {
+    text = 'координаты определятся при подключении к сети';
+  } else if (state.city_lat || state.city_lon) {
+    text = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
+  }
+  hintEl.textContent = text;
+}
+
+function updateDeviceNameHint(name) {
+  var hintEl = document.getElementById('device-name-hint');
+  if (!hintEl) return;
+  hintEl.textContent = 'страница доступна как http://' + (name || 'inkroam-setup') + '.local/ из той же сети';
+}
+
+// ── Экраны: токены размеров, каталог виджетов, дашборды ──
+
+function widgetPxWidth(size) {
+  if (size === 'S') return 202;
+  if (size === 'M') return 296;
+  return 0;  // flex — без фиксированной ширины
+}
+
+// Варианты размера уже недоступные по min_width виджета не предлагаются.
+function sizeOptionsHtml(minWidth, current) {
+  var opts = [];
+  if (minWidth <= 202) opts.push(['S', 'S (202 px)']);
+  if (minWidth <= 296) opts.push(['M', 'M (296 px)']);
+  opts.push(['flex', 'гибкий']);
+  return opts.map(function (o) {
+    return '<option value="' + o[0] + '"' + (o[0] === current ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+}
+
+function slotOptionsHtml(current) {
+  var html = '<option value="">— слот —</option>';
+  SLOTS.forEach(function (s) {
+    html += '<option value="' + s[0] + '"' + (s[0] === current ? ' selected' : '') + '>' + escapeHtml(s[1]) + '</option>';
+  });
+  return html;
+}
+
+function widgetTitle(inst) {
+  if ((inst.type === 'metric' || inst.type === 'text') && inst.label) return inst.label;
+  var spec = state.widgetsByType[inst.type];
+  return spec ? spec.title : inst.type;
+}
+
+// Слоты, которые требует виджет: у metric — единственный выбранный слот, у
+// остальных — spec.slots из /api/widgets. text данных не требует вовсе.
+function computeWidgetSourceStatus(inst, spec) {
+  if (inst.type === 'text') return null;
+  var slots;
+  if (inst.type === 'metric') {
+    slots = inst.slot ? [inst.slot] : [];
+  } else {
+    slots = (spec && spec.slots) || [];
+  }
+  if (slots.length === 0) return null;
+  var missing = [];
+  var seen = {};
+  slots.forEach(function (s) {
+    var card = slotSourceCard(s);
+    if (!card || seen[card]) return;
+    if (!isCardConfigured(card)) { seen[card] = true; missing.push(card); }
+  });
+  if (missing.length === 0) return { configured: true, text: 'источник настроен' };
+  var titles = missing.map(function (k) { return cardTitleByKey(k); });
+  return { configured: false, text: 'нужен источник: ' + titles.join(', '), firstMissing: missing[0] };
+}
+
+function isInstanceConfigured(inst) {
+  var spec = state.widgetsByType[inst.type];
+  var status = computeWidgetSourceStatus(inst, spec);
+  return !status || status.configured;
+}
+
+function currentDashboard() {
+  if (!state.dashboardsSupported) return null;
+  return state.dashboards[state.currentTab] || null;
+}
+
+function pushWidgetInstance(row, inst) {
+  var dash = currentDashboard();
+  if (!dash) return;
+  dash.rows[row].push(inst);
+}
+
+function moveWidget(row, idx, dir) {
+  var dash = currentDashboard();
+  if (!dash) return;
+  var arr = dash.rows[row];
+  var j = dir === 'up' ? idx - 1 : idx + 1;
+  if (j < 0 || j >= arr.length) return;
+  var tmp = arr[idx]; arr[idx] = arr[j]; arr[j] = tmp;
+}
+
+function moveToOtherRow(row, idx) {
+  var dash = currentDashboard();
+  if (!dash) return;
+  var other = row === 0 ? 1 : 0;
+  var inst = dash.rows[row].splice(idx, 1)[0];
+  if (inst) dash.rows[other].push(inst);
+}
+
+function removeWidget(row, idx) {
+  var dash = currentDashboard();
+  if (!dash) return;
+  dash.rows[row].splice(idx, 1);
+}
+
+function renderRow(dash, rowIndex) {
+  var row = dash.rows[rowIndex];
+  var html = '<div class="widget-list">';
+  row.forEach(function (inst, i) {
+    var spec = state.widgetsByType[inst.type];
+    var title = spec ? spec.title : inst.type;
+    var minWidth = spec ? spec.min_width : 0;
+    var status = computeWidgetSourceStatus(inst, spec);
+    html += '<div class="widget-item">';
+    html += '<div class="row"><span class="label">' + escapeHtml(title) + '</span>' +
+      '<button type="button" class="small danger" data-remove-widget data-row="' + rowIndex + '" data-idx="' + i + '">✕</button></div>';
+    html += '<div class="widget-item-controls">' +
+      '<select data-widget-field="size" data-row="' + rowIndex + '" data-idx="' + i + '">' + sizeOptionsHtml(minWidth, inst.size) + '</select>' +
+      '<label class="checkbox-row inline"><input type="checkbox" data-widget-field="divider" data-row="' + rowIndex + '" data-idx="' + i + '"' + (inst.divider ? ' checked' : '') + '><span>линия слева</span></label>' +
+      '</div>';
+    if (inst.type === 'metric') {
+      html += '<div class="widget-item-controls">' +
+        '<select data-widget-field="slot" data-row="' + rowIndex + '" data-idx="' + i + '">' + slotOptionsHtml(inst.slot) + '</select>' +
+        '<input type="text" placeholder="подпись" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
+        '</div>';
+    } else if (inst.type === 'text') {
+      html += '<div class="widget-item-controls">' +
+        '<input type="text" placeholder="текст" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
+        '</div>';
+    }
+    html += '<div class="widget-item-move">' +
+      '<button type="button" class="small secondary" data-move-widget="up" data-row="' + rowIndex + '" data-idx="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+      '<button type="button" class="small secondary" data-move-widget="down" data-row="' + rowIndex + '" data-idx="' + i + '"' + (i === row.length - 1 ? ' disabled' : '') + '>▼</button>' +
+      '<button type="button" class="small secondary" data-move-row data-row="' + rowIndex + '" data-idx="' + i + '">→ в другой ряд</button>' +
+      '</div>';
+    if (status) {
+      html += '<p class="source-status ' + (status.configured ? 'ok' : 'missing') + '"' +
+        (status.configured ? '' : ' data-scroll-card="' + status.firstMissing + '"') + '>' + escapeHtml(status.text) + '</p>';
+    }
+    html += '</div>';
+  });
+  if (row.length === 0) html += '<p class="empty">виджетов нет</p>';
+  html += '</div>';
+  html += '<button type="button" class="secondary small" data-add-widget data-row="' + rowIndex + '">+ виджет</button>';
+  return html;
+}
+
+// Палитра «+ виджет»: для metric/text перед добавлением просит слот/подпись
+// (paletteSubType), для остальных типов добавляет сразу с размером по
+// умолчанию из каталога.
+function renderPalette(rowIndex) {
+  if (state.paletteRow !== rowIndex) return '';
+  var html = '<div class="palette">';
+  if (state.paletteSubType && state.paletteSubType.row === rowIndex) {
+    var st = state.paletteSubType;
+    html += '<div class="add-form">';
+    if (st.type === 'metric') {
+      html += '<select id="palette-slot">' + slotOptionsHtml(st.slot) + '</select>';
+    }
+    html += '<input type="text" id="palette-label" placeholder="подпись" value="' + escapeAttr(st.label) + '">';
+    html += '<div class="actions"><button type="button" id="palette-confirm">Добавить</button><button type="button" class="secondary" id="palette-cancel">Отмена</button></div>';
+    html += '</div>';
+  } else if (state.widgetsCatalog.length === 0) {
+    html += '<p class="empty">каталог виджетов недоступен: обновите прошивку</p>';
+  } else {
+    state.widgetsCatalog.forEach(function (w) {
+      html += '<div class="row"><span class="label">' + escapeHtml(w.title || w.type) + '</span>' +
+        '<button type="button" class="small" data-palette-add="' + w.type + '" data-row="' + rowIndex + '">добавить</button></div>';
+    });
+  }
+  html += '<button type="button" class="secondary small full" data-palette-close>закрыть</button>';
+  html += '</div>';
+  return html;
+}
+
+function handleAddPaletteType(type, row) {
+  var spec = state.widgetsByType[type];
+  if (type === 'metric' || type === 'text') {
+    state.paletteSubType = { type: type, row: row, slot: '', label: '' };
+    renderDashboards();
+    return;
+  }
+  pushWidgetInstance(row, { type: type, size: spec ? spec.default_size : 'flex', divider: false, slot: '', label: '' });
+  state.paletteRow = null;
+  renderDashboards();
+}
+
+function confirmPaletteSubType() {
+  var st = state.paletteSubType;
+  if (!st) return;
+  if (st.type === 'metric' && !st.slot) {
+    setStatus('выберите слот для показателя');
+    return;
+  }
+  var spec = state.widgetsByType[st.type];
+  pushWidgetInstance(st.row, { type: st.type, size: spec ? spec.default_size : 'S', divider: false, slot: st.slot, label: st.label });
+  state.paletteSubType = null;
+  state.paletteRow = null;
+  renderDashboards();
+}
+
+function renderDashboards() {
+  var box = el('dashboards-box');
+  if (!state.dashboardsSupported) {
+    box.innerHTML = '<p class="empty">прошивка без поддержки экранов</p>';
+    drawPreview();
+    return;
+  }
+  var tabsHtml = '<div class="tabs">';
+  state.dashboards.forEach(function (d, i) {
+    tabsHtml += '<button type="button" class="tab-btn' + (i === state.currentTab ? ' active' : '') + '" data-tab="' + i + '">' +
+      escapeHtml(d.name || ('Экран ' + (i + 1))) + '</button>';
+  });
+  tabsHtml += '</div>';
+
+  var dash = state.dashboards[state.currentTab];
+  var editorHtml = '';
+  editorHtml += '<label>Имя экрана<input type="text" id="dash-name" value="' + escapeAttr(dash.name) + '"></label>';
+  editorHtml += '<label class="checkbox-row"><input type="radio" name="active-dashboard" id="dash-active-radio"' +
+    (state.activeDashboard === state.currentTab ? ' checked' : '') + '><span>Активный экран (переключается кнопками на плате)</span></label>';
+  editorHtml += '<div class="dash-row"><h4>Верхний ряд</h4>' + renderRow(dash, 0) + renderPalette(0) + '</div>';
+  editorHtml += '<div class="dash-row"><h4>Нижний ряд</h4>' + renderRow(dash, 1) + renderPalette(1) + '</div>';
+
+  box.innerHTML = tabsHtml + editorHtml;
+  drawPreview();
+}
+
+// ── предпросмотр: canvas 800×480, то же правило ряда, что у прошивки ──
+
+function drawWidgetBox(ctx, x, y, w, h, inst) {
+  var configured = isInstanceConfigured(inst);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x, y, w, h);
+  if (!configured) fillHatch(ctx, x, y, w, h);
+  ctx.fillStyle = '#1a1a17';
+  ctx.font = '600 13px -apple-system, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText(widgetTitle(inst), x + 6, y + 6);
+  ctx.restore();
+  ctx.strokeStyle = '#dcdad2';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+}
+
+// Виджет без настроенного источника — штриховкой, а не пустотой: место в
+// раскладке видно сразу, без наведения на бейдж.
+function fillHatch(ctx, x, y, w, h) {
+  ctx.strokeStyle = '#dcdad2';
+  ctx.lineWidth = 1;
+  var step = 10;
+  for (var d = -h; d < w; d += step) {
+    ctx.beginPath();
+    ctx.moveTo(x + d, y + h);
+    ctx.lineTo(x + d + h, y);
+    ctx.stroke();
+  }
+}
+
+function drawPreviewRow(ctx, row, left, right, y0, y1, gap) {
+  var n = row.length;
+  if (n === 0) return;
+  var totalW = right - left;
+  var avail = totalW - gap * (n - 1);
+  var flexCount = 0;
+  row.forEach(function (w) { if (w.size === 'flex') flexCount++; });
+  var widths;
+  var fixedSum = 0;
+  row.forEach(function (w) { if (w.size !== 'flex') fixedSum += widgetPxWidth(w.size); });
+  // Переполнение ряда (например три M) — прошивка делит ряд поровну между
+  // видимыми (layout.cpp, layout_row); предпросмотр повторяет то же правило,
+  // а не подгоняет картинку клампом, которого на устройстве нет.
+  var overflow = fixedSum + flexCount * 120 > avail;
+  if (flexCount > 0 && !overflow) {
+    var flexW = (avail - fixedSum) / flexCount;
+    widths = row.map(function (w) { return w.size === 'flex' ? flexW : widgetPxWidth(w.size); });
+  } else {
+    var each = avail / n;
+    widths = row.map(function () { return each; });
+  }
+  var x = left;
+  row.forEach(function (w, i) {
+    if (i > 0 && w.divider) {
+      var lineX = x - gap / 2;
+      ctx.fillStyle = '#dcdad2';
+      ctx.fillRect(lineX - 1, y0, 2, y1 - y0);
+    }
+    drawWidgetBox(ctx, x, y0, widths[i], y1 - y0, w);
+    x += widths[i] + gap;
+  });
+}
+
+function drawPreview() {
+  var canvas = el('preview-canvas');
+  if (!canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f4f3ef';
+  ctx.fillRect(0, 0, W, H);
+
+  var headerH = 40, margin = 12, gap = 12, lineW = 2;
+  ctx.fillStyle = '#1a1a17';
+  ctx.fillRect(0, 0, W, headerH);
+
+  var dash = currentDashboard();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '600 18px -apple-system, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(dash ? (dash.name || 'без имени') : 'нет данных', margin, headerH / 2);
+
+  if (!dash) return;
+
+  var left = margin, right = W - margin, top = headerH + margin, bottom = H - margin;
+  var rows = dash.rows;
+  var nonEmpty = [rows[0].length > 0, rows[1].length > 0];
+  var totalH = bottom - top;
+  var rects = [null, null];
+  if (nonEmpty[0] && nonEmpty[1]) {
+    var rh = (totalH - gap * 2 - lineW) / 2;
+    rects[0] = { y0: top, y1: top + rh };
+    var lineY = rects[0].y1 + gap;
+    ctx.fillStyle = '#dcdad2';
+    ctx.fillRect(left, lineY, right - left, lineW);
+    rects[1] = { y0: lineY + lineW + gap, y1: bottom };
+  } else if (nonEmpty[0]) {
+    rects[0] = { y0: top, y1: bottom };
+  } else if (nonEmpty[1]) {
+    rects[1] = { y0: top, y1: bottom };
+  }
+
+  rows.forEach(function (row, ri) {
+    if (!rects[ri]) return;
+    drawPreviewRow(ctx, row, left, right, rects[ri].y0, rects[ri].y1, gap);
+  });
+}
+
+// ── Источники: заводские карточки по фиксированным id/kind ──
+
+function renderClaudeCard() {
+  var c = conn('claude');
+  return '<div class="source-card" id="source-card-claude"><h3>Claude</h3>' + statusLineHtml('claude') +
+    '<label>Access token<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="claude"></label>' +
+    '<label>Refresh token<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="claude"></label>' +
+    '<p class="hint">На Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → поля <code>claudeAiOauth.accessToken</code> и <code>.refreshToken</code>. Общий refresh-токен с CLI ротируется — см. docs/decisions.md, п.2.</p>' +
+    '</div>';
+}
+
+function renderCodexCard() {
+  var c = conn('codex');
+  return '<div class="source-card" id="source-card-codex"><h3>Codex</h3>' + statusLineHtml('codex') +
+    '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
+    '<p class="hint">Источник: <code>~/.codex/auth.json</code> → поле <code>tokens.access_token</code>.</p>' +
+    '</div>';
+}
+
+function renderMailCard() {
+  var c = conn('mail');
+  return '<div class="source-card" id="source-card-mail"><h3>Почта</h3>' + statusLineHtml('mail') +
+    '<label>Сервер IMAP<input type="text" value="' + escapeAttr(c.url) + '" placeholder="imap.gmail.com" data-conn-field="url" data-conn-id="mail"></label>' +
+    '<p class="warning" id="hint-changed-mail" hidden>сервер изменился — введите адрес ящика и пароль заново, иначе они не сохранятся</p>' +
+    '<label>Адрес ящика<input type="text" placeholder="' + tokenPlaceholder(c.username_set) + '" data-conn-field="username" data-conn-id="mail"></label>' +
+    '<label>Пароль приложения<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="mail"></label>' +
+    '<p class="hint">Gmail: используйте пароль приложения, не пароль аккаунта.</p>' +
+    '</div>';
+}
+
+function sensorSlotOptionsHtml() {
+  var opts = [['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура']];
+  var html = '';
+  opts.forEach(function (o) { html += '<option value="' + o[0] + '">' + o[1] + '</option>'; });
+  html += '<option value="__custom">свой слот…</option>';
+  return html;
+}
+
+function renderHomeCard() {
+  var c = conn('home');
+  var html = '<div class="source-card" id="source-card-home"><h3>Умный дом</h3>' + statusLineHtml('home') +
+    '<label>Адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-conn-field="url" data-conn-id="home"></label>' +
+    '<p class="warning" id="hint-changed-home" hidden>адрес изменился — введите токен заново, иначе он не сохранится</p>' +
+    '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="home"></label>' +
+    '<p class="hint">Долгоживущий токен — из профиля пользователя Home Assistant.</p>' +
+    '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="home"' + (c.insecure ? ' checked' : '') + '>' +
+    '<span>Не проверять сертификат (https)<br><span class="warning">Только для самоподписанного сертификата домашнего сервера. Без проверки токен могут перехватить в чужой сети — см. docs/decisions.md, п.9.</span></span></div>' +
+    '<p class="hint">Датчики:</p>';
+  (c.map || []).forEach(function (m, mi) {
+    html += '<div class="row"><span class="label">' + escapeHtml(sensorRole(m.slot)) + '</span>' +
+      '<input type="text" style="flex:1;margin:0 8px" value="' + escapeAttr(m.source) + '" placeholder="entity_id" data-sensor-field="source" data-sensor-idx="' + mi + '">' +
+      '<button type="button" class="small danger" data-remove-sensor data-sensor-idx="' + mi + '">✕</button></div>';
+  });
+  if (state.addSensorOpen) {
+    html += '<div class="add-form">' +
+      '<select id="add-sensor-slot">' + sensorSlotOptionsHtml() + '</select>' +
+      '<input type="text" id="add-sensor-custom" placeholder="свой слот" hidden>' +
+      '<div class="actions"><button type="button" id="add-sensor-confirm">Добавить</button><button type="button" class="secondary" id="add-sensor-cancel">Отмена</button></div>' +
+      '</div>';
+  } else {
+    html += '<button type="button" class="secondary small" id="add-sensor-btn">+ датчик</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderRatesCard() {
+  return '<div class="source-card" id="source-card-rates"><h3>Курсы</h3>' + statusLineHtml('rates') +
+    '<p class="hint">Публичные API без ключа — настраивать нечего.</p></div>';
+}
+
+function renderWeatherCard() {
+  var cityHint = '';
+  if (state.city && state.city !== state.city_resolved) {
+    cityHint = 'координаты определятся при подключении к сети';
+  } else if (state.city_lat || state.city_lon) {
+    cityHint = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
+  }
+  return '<div class="source-card" id="source-card-weather"><h3>Погода и часовой пояс</h3>' + statusLineHtml('weather') +
+    '<label>Город<input type="text" id="device-city" value="' + escapeAttr(state.city) + '" placeholder="Екатеринбург"></label>' +
+    '<p class="empty" id="city-hint">' + escapeHtml(cityHint) + '</p>' +
+    '</div>';
+}
+
+// Не заводские коннекторы (kind=http, id не из FACTORY_IDS) — «Свой JSON» в
+// сворачиваемом блоке «дополнительно»: id создаётся один раз и не
+// редактируется (map[] и привязка карточки завязаны на него).
+function renderCustomConnectors() {
+  var customs = state.connectors.filter(function (c) { return !isFactoryId(c.id); });
+  if (customs.length === 0) return '<p class="empty">дополнительных источников нет</p>';
+  var html = '';
+  customs.forEach(function (c) {
+    // id — не рукописный, но приходит с устройства, а /api/config пишется из
+    // любой сети: в атрибуты только через escapeAttr.
+    var cid = escapeAttr(c.id);
+    html += '<div class="connector-card">';
+    html += '<label>Идентификатор<input type="text" value="' + escapeAttr(c.id) + '" disabled></label>';
+    html += '<label>Адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="https://example.com/data.json" data-conn-field="url" data-conn-id="' + cid + '"></label>';
+    html += '<p class="warning" id="hint-changed-' + cid + '" hidden>адрес изменился — введите токен заново, иначе он не сохранится</p>';
+    html += '<div class="grid">';
+    html += '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="' + cid + '"></label>';
+    html += '<label>Период, с<input type="number" min="5" value="' + c.interval + '" data-conn-field="interval" data-conn-id="' + cid + '"></label>';
+    html += '</div>';
+    html += '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="' + c.id + '"' + (c.insecure ? ' checked' : '') + '><span>Не проверять сертификат (https)</span></div>';
+    html += '<p class="hint">Привязка слотов:</p>';
+    (c.map || []).forEach(function (m, mi) {
+      html += '<div class="row"><select data-map-field="slot" data-conn-id="' + c.id + '" data-map-idx="' + mi + '">' + slotOptionsHtml(m.slot) + '</select>' +
+        '<input type="text" style="flex:1;margin:0 8px" value="' + escapeAttr(m.source) + '" placeholder="путь в JSON" data-map-field="source" data-conn-id="' + c.id + '" data-map-idx="' + mi + '">' +
+        '<button type="button" class="small danger" data-remove-map data-conn-id="' + c.id + '" data-map-idx="' + mi + '">✕</button></div>';
+    });
+    html += '<button type="button" class="secondary small" data-add-map data-conn-id="' + c.id + '">+ строка</button>';
+    html += '<button type="button" class="danger small full" data-remove-connector="' + c.id + '">Удалить источник</button>';
+    html += '</div>';
+  });
+  return html;
+}
+
+function renderSources() {
+  el('sources-list').innerHTML = renderClaudeCard() + renderCodexCard() + renderMailCard() +
+    renderHomeCard() + renderRatesCard() + renderWeatherCard();
+  el('custom-connectors').innerHTML = renderCustomConnectors();
+  updateAllChangedHints();
+}
+
+// ── Сеть — без изменений логики, только без гейта на запись ──
 
 function renderNetworks() {
   var box = el('saved-networks');
@@ -360,11 +994,11 @@ function renderScanList(results) {
   });
 }
 
-// Сам скан теперь выполняет главный цикл устройства, а не задача веб-сервера
-// (иначе блокирующий Wi-Fi скан валил её по сторожевому таймеру — устройство
-// перезагружалось на этой самой кнопке). /api/scan отвечает немедленно тем,
-// что уже есть в кеше, и признаком scanning — пока он true, результат может
-// быть пустым или устаревшим, спрашиваем ещё раз через полторы секунды.
+// Сам скан выполняет главный цикл устройства, а не задача веб-сервера
+// (блокирующий Wi-Fi скан валил её по сторожевому таймеру). /api/scan
+// отвечает немедленно тем, что уже есть в кеше, и признаком scanning — пока
+// он true, результат может быть пустым или устаревшим, спрашиваем ещё раз
+// через полторы секунды.
 function pollScan() {
   fetchJSON('/api/scan').then(function (res) {
     renderScanList(res.networks || []);
@@ -376,66 +1010,6 @@ function pollScan() {
     }
   }).catch(function (err) { setStatus('сканирование не удалось: ' + err.message); });
 }
-
-
-// Готовые источники. Человеку нечего знать про id и про то, какой путь в JSON
-// ведёт к курсу биткоина: он выбирает «умный дом» или «курсы валют», а поля
-// для заполнения остаются только те, которых не знает никто, кроме него, —
-// адрес его сервера и его токен.
-function makePreset(kind) {
-  var stamp = Date.now().toString(36).slice(-4);
-  if (kind === 'homeassistant') {
-    return {
-      id: 'home-' + stamp,
-      title: 'Умный дом',
-      kind: 'homeassistant',
-      url: '',
-      urlHint: 'http://192.168.1.2:8123',
-      interval: 300,
-      token: '', token_set: false, insecure: false,
-      fields: [
-        { slot: 'co2',           label: 'Датчик CO₂',        hint: 'sensor.co2',            ttl: 300 },
-        { slot: 'tvoc',          label: 'Датчик TVOC',       hint: 'sensor.air_quality',    ttl: 300 },
-        { slot: 'weather.temp',  label: 'Погода',            hint: 'weather.home',          ttl: 3600 }
-      ],
-      map: []
-    };
-  }
-  if (kind === 'rates') {
-    // Публичные источники, ключей не требуют — заполнено целиком, человеку
-    // остаётся только нажать «Сохранить».
-    return {
-      id: 'rates-' + stamp,
-      title: 'Курсы валют',
-      kind: 'http',
-      url: 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-      interval: 300,
-      token: '', token_set: false, insecure: false,
-      fields: [],
-      map: [{ slot: 'btc', source: 'bitcoin.usd', ttl: 300 }]
-    };
-  }
-  return {
-    id: 'custom-' + stamp,
-    title: 'Свой источник',
-    kind: 'http',
-    url: '',
-    urlHint: 'https://example.com/data.json',
-    interval: 300,
-    token: '', token_set: false, insecure: false,
-    fields: [],
-    map: [],
-    custom: true
-  };
-}
-
-// Что показывает кадр — список слотов для ручной привязки в «своём источнике».
-var SLOTS = [
-  ['btc', 'Курс BTC'], ['usd_rub', 'Доллар'], ['eur_rub', 'Евро'],
-  ['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура'],
-  ['limit.claude.5h', 'Claude, 5 часов'], ['limit.claude.week', 'Claude, неделя'],
-  ['limit.codex', 'GPT'], ['mail.unread', 'Непрочитанных писем']
-];
 
 function showAddForm(ssid, secure) {
   pendingSsid = ssid;
@@ -461,42 +1035,153 @@ function confirmAddNetwork() {
   renderNetworks();
 }
 
-function renderConnectors() {
-  var box = el('connector-list');
-  if (state.connectors.length === 0) {
-    box.innerHTML = '<p class="empty">коннекторов нет</p>';
-    return;
-  }
-  box.innerHTML = '';
-  state.connectors.forEach(function (c, i) {
-    var card = document.createElement('div');
-    card.className = 'connector-card';
-    card.innerHTML =
-      '<div class="grid">' +
-      '<label>id<input type="text" value="' + escapeAttr(c.id) + '" data-field="id" data-index="' + i + '"></label>' +
-      '<label>тип<select data-field="kind" data-index="' + i + '">' +
-      '<option value="homeassistant"' + (c.kind === 'homeassistant' ? ' selected' : '') + '>homeassistant</option>' +
-      '<option value="http"' + (c.kind === 'http' ? ' selected' : '') + '>http</option>' +
-      '</select></label>' +
-      '</div>' +
-      '<label>адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-field="url" data-index="' + i + '"></label>' +
-      '<div class="grid">' +
-      '<label>токен<input type="password" placeholder="' + (c.token_set ? 'задан, оставить пустым' : 'нет') + '" data-field="token" data-index="' + i + '"></label>' +
-      '<label>период, с<input type="number" min="5" value="' + c.interval + '" data-field="interval" data-index="' + i + '"></label>' +
-      '</div>' +
-      '<label class="checkbox-row"><input type="checkbox" data-field="insecure" data-index="' + i + '"' + (c.insecure ? ' checked' : '') + '>' +
-      '<span>Не проверять сертификат (https)<br><span class="warning">Только для самоподписанного сертификата домашнего сервера. Без проверки токен коннектора могут перехватить в чужой сети — см. docs/decisions.md, п.9.</span></span></label>' +
-      '<button type="button" class="small danger" data-remove-connector="' + i + '">Удалить коннектор</button>';
-    box.appendChild(card);
+// ── источники: добавление/удаление датчиков, строк map, источников ──
+
+function confirmAddSensor() {
+  var sel = el('add-sensor-slot');
+  var slot = sel.value;
+  if (slot === '__custom') slot = (el('add-sensor-custom').value || '').trim();
+  if (!slot) return;
+  var home = conn('home');
+  if (!home) return;
+  home.map.push({
+    slot: slot, source: '', ttl: (slot === 'co2' || slot === 'tvoc') ? 600 : 3600,
+    delta_source: '', delta_is_previous: false, has_history: (slot === 'co2' || slot === 'tvoc'),
+    history_source: '', history_item: ''
+  });
+  state.addSensorOpen = false;
+  renderSources();
+}
+
+function removeSensor(idx) {
+  var home = conn('home');
+  if (!home) return;
+  home.map.splice(idx, 1);
+  renderSources();
+}
+
+function addMapRow(connId) {
+  var c = conn(connId);
+  if (!c) return;
+  c.map.push({ slot: '', source: '', ttl: 300, delta_source: '', delta_is_previous: false, has_history: false, history_source: '', history_item: '' });
+  renderSources();
+}
+
+function removeMapRow(connId, idx) {
+  var c = conn(connId);
+  if (!c) return;
+  c.map.splice(idx, 1);
+  renderSources();
+}
+
+function addCustomConnector() {
+  var stamp = Date.now().toString(36).slice(-4);
+  var id = 'custom-' + stamp;
+  state.connectors.push({
+    id: id, kind: 'http', url: '', interval: 300,
+    token: '', token_set: false, refresh_token: '', refresh_token_set: false,
+    username: '', username_set: false, insecure: false, map: []
+  });
+  state.connectorOrig[id] = { url: '', insecure: false };
+  renderSources();
+}
+
+function removeConnector(id) {
+  var idx = state.connectors.findIndex(function (c) { return c.id === id; });
+  if (idx >= 0) state.connectors.splice(idx, 1);
+  delete state.connectorOrig[id];
+  renderSources();
+  renderDashboards();  // виджеты могли ссылаться на слоты удалённого источника — бейджи надо пересчитать
+}
+
+// ── загрузка и опрос устройства ──
+
+function loadWidgetsCatalog() {
+  return fetchJSON('/api/widgets').then(function (data) {
+    state.widgetsCatalog = Array.isArray(data) ? data : [];
+    state.widgetsByType = {};
+    state.widgetsCatalog.forEach(function (w) { state.widgetsByType[w.type] = w; });
+  }).catch(function () {
+    state.widgetsCatalog = [];
+    state.widgetsByType = {};
   });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+function loadConfig() {
+  return fetchJSON('/api/config').then(function (cfg) {
+    state.device_name = cfg.device_name || '';
+    state.timezone_minutes = cfg.timezone_minutes || 0;
+    state.city = cfg.city || '';
+    state.city_resolved = cfg.city_resolved || '';
+    state.city_lat = cfg.city_lat || 0;
+    state.city_lon = cfg.city_lon || 0;
+    state.networks = (cfg.networks || []).map(function (n) {
+      return { ssid: n.ssid, password: '', password_set: !!n.password_set };
+    });
+    state.connectors = (cfg.connectors || []).map(function (c) {
+      return {
+        id: c.id, kind: c.kind || 'http', url: c.url || '',
+        interval: c.interval || 300, token: '', token_set: !!c.token_set,
+        refresh_token: '', refresh_token_set: !!c.refresh_token_set,
+        username: '', username_set: !!c.username_set,
+        insecure: !!c.insecure,
+        // Мутируем эти же объекты, не пересобираем — в них есть has_history,
+        // delta_source, delta_is_previous, history_source, history_item, они
+        // должны уйти назад ровно так, как пришли.
+        map: c.map || []
+      };
+    });
+    ensureFactoryConnectors();
+    state.connectorOrig = {};
+    state.connectors.forEach(function (c) { state.connectorOrig[c.id] = { url: c.url, insecure: c.insecure }; });
+
+    if (Array.isArray(cfg.dashboards)) {
+      state.dashboardsSupported = true;
+      state.dashboards = cfg.dashboards.map(function (d) {
+        return {
+          name: d.name || '',
+          rows: [0, 1].map(function (r) {
+            return ((d.rows && d.rows[r]) || []).map(function (w) {
+              return { type: w.type, size: w.size || 'flex', divider: !!w.divider, slot: w.slot || '', label: w.label || '' };
+            });
+          })
+        };
+      });
+      state.activeDashboard = cfg.active_dashboard || 0;
+      if (state.currentTab >= state.dashboards.length) state.currentTab = 0;
+    } else {
+      state.dashboardsSupported = false;
+      state.dashboards = [];
+    }
+
+    el('device-name').value = state.device_name;
+    updateDeviceNameHint(state.device_name);
+
+    renderNetworks();
+    renderSources();
+    renderDashboards();
+    state.loaded = true;
+    el('save-btn').disabled = false;
+  }).catch(function (e) {
+    // Настройки не пришли — форму НЕ показываем как редактируемую: пустая
+    // форма, сохранённая по привычке, ушла бы на устройство как «сетей нет,
+    // адреса пустые» и стёрла бы сети и секреты (ревью 2026-09-21). Кнопка
+    // «Сохранить» заблокирована до удачной загрузки.
+    state.loaded = false;
+    el('save-btn').disabled = true;
+    setStatus('не удалось загрузить настройки: ' + e.message + ' — обновите страницу');
   });
 }
-function escapeAttr(s) { return escapeHtml(s); }
+
+function pollStatus() {
+  fetchJSON('/api/status').then(function (data) {
+    state.status = data;
+    updateStatusLines();
+  }).catch(function () { /* тихо: устройство недоступно, карточки уже показывают «данных ещё нет» */ });
+  setTimeout(pollStatus, 10000);
+}
+
+// ── события ──
 
 document.addEventListener('click', function (e) {
   var t = e.target;
@@ -505,74 +1190,164 @@ document.addEventListener('click', function (e) {
     setStatus('сканируем…');
     pollScan();
   }
-
   if (t.dataset && t.dataset.pickSsid !== undefined) {
     showAddForm(t.dataset.pickSsid, t.dataset.secure === '1');
   }
-
   if (t.id === 'add-network-confirm') confirmAddNetwork();
   if (t.id === 'add-network-cancel') { el('add-network-form').hidden = true; pendingSsid = null; }
-
   if (t.dataset && t.dataset.removeNetwork !== undefined) {
     state.networks.splice(Number(t.dataset.removeNetwork), 1);
     renderNetworks();
   }
 
-  if (t.dataset.preset) {
-    state.connectors.push(makePreset(t.dataset.preset));
-    renderConnectors();
+  // Экраны
+  if (t.dataset && t.dataset.tab !== undefined) {
+    state.currentTab = Number(t.dataset.tab);
+    state.paletteRow = null;
+    state.paletteSubType = null;
+    renderDashboards();
+  }
+  if (t.id === 'dash-active-radio') { state.activeDashboard = state.currentTab; }
+  if (t.dataset && t.dataset.addWidget !== undefined) {
+    var r = Number(t.dataset.row);
+    state.paletteRow = (state.paletteRow === r) ? null : r;
+    state.paletteSubType = null;
+    renderDashboards();
+  }
+  if (t.dataset && t.dataset.paletteClose !== undefined) {
+    state.paletteRow = null;
+    state.paletteSubType = null;
+    renderDashboards();
+  }
+  if (t.dataset && t.dataset.paletteAdd !== undefined) {
+    handleAddPaletteType(t.dataset.paletteAdd, Number(t.dataset.row));
+  }
+  if (t.id === 'palette-confirm') confirmPaletteSubType();
+  if (t.id === 'palette-cancel') { state.paletteSubType = null; renderDashboards(); }
+  if (t.dataset && t.dataset.moveWidget !== undefined) {
+    moveWidget(Number(t.dataset.row), Number(t.dataset.idx), t.dataset.moveWidget);
+    renderDashboards();
+  }
+  if (t.dataset && t.dataset.moveRow !== undefined) {
+    moveToOtherRow(Number(t.dataset.row), Number(t.dataset.idx));
+    renderDashboards();
+  }
+  if (t.dataset && t.dataset.removeWidget !== undefined) {
+    removeWidget(Number(t.dataset.row), Number(t.dataset.idx));
+    renderDashboards();
+  }
+  if (t.classList && t.classList.contains('source-status') && t.dataset.scrollCard) {
+    var target = document.getElementById('source-card-' + t.dataset.scrollCard);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  if (t.dataset && t.dataset.removeConnector !== undefined) {
-    state.connectors.splice(Number(t.dataset.removeConnector), 1);
-    renderConnectors();
-  }
+  // Источники
+  if (t.id === 'add-sensor-btn') { state.addSensorOpen = true; renderSources(); }
+  if (t.id === 'add-sensor-cancel') { state.addSensorOpen = false; renderSources(); }
+  if (t.id === 'add-sensor-confirm') confirmAddSensor();
+  if (t.dataset && t.dataset.removeSensor !== undefined) removeSensor(Number(t.dataset.sensorIdx));
+  if (t.dataset && t.dataset.addMap !== undefined) addMapRow(t.dataset.connId);
+  if (t.dataset && t.dataset.removeMap !== undefined) removeMapRow(t.dataset.connId, Number(t.dataset.mapIdx));
+  if (t.id === 'add-custom-connector') addCustomConnector();
+  if (t.dataset && t.dataset.removeConnector !== undefined) removeConnector(t.dataset.removeConnector);
 
   if (t.id === 'save-btn') save();
   if (t.id === 'reboot-btn') reboot();
 });
 
-function handleConnectorFieldChange(e) {
+function handleFieldChange(e) {
   var t = e.target;
-  if (!t.dataset || t.dataset.index === undefined) return;
-  var c = state.connectors[Number(t.dataset.index)];
-  if (!c) return;
-  if (t.dataset.field === 'interval') c.interval = Number(t.value) || 300;
-  else if (t.dataset.field === 'insecure') c.insecure = t.checked;
-  else c[t.dataset.field] = t.value;
-}
-// 'change' — для чекбокса insecure (не все браузеры шлют 'input' по клику на
-// checkbox одинаково надёжно), 'input' — для текстовых полей, как и раньше.
-document.addEventListener('input', handleConnectorFieldChange);
-document.addEventListener('change', handleConnectorFieldChange);
+  if (!t.dataset) return;
 
-// Запись настроек (docs/decisions.md, п.8): устройство разрешает её только
-// с интерфейса своей точки доступа и проверяет это само по каждому запросу —
-// странице не нужно ничего предъявлять сверх обычного запроса, но и обходить
-// отказ ей нечем: canWrite здесь только для того, чтобы не звать сервер
-// заведомо впустую и объяснить пользователю причину раньше, чем это сделает
-// сервер кодом 403.
-function save() {
-  if (!state.canWrite) {
-    setStatus('запись запрещена: подключитесь к точке доступа устройства');
+  if (t.dataset.connField !== undefined && t.dataset.connId !== undefined) {
+    var c = conn(t.dataset.connId);
+    if (!c) return;
+    var field = t.dataset.connField;
+    if (field === 'interval') c.interval = Number(t.value) || 300;
+    else if (field === 'insecure') c.insecure = t.checked;
+    else c[field] = t.value;
+    if (field === 'url' || field === 'insecure') updateChangedHint(t.dataset.connId);
     return;
   }
-  doSave();
-}
 
-function doSave() {
+  if (t.dataset.mapField !== undefined && t.dataset.connId !== undefined && t.dataset.mapIdx !== undefined) {
+    var c2 = conn(t.dataset.connId);
+    if (!c2) return;
+    var m = c2.map[Number(t.dataset.mapIdx)];
+    if (!m) return;
+    m[t.dataset.mapField] = t.value;
+    return;
+  }
+
+  if (t.dataset.sensorField !== undefined && t.dataset.sensorIdx !== undefined) {
+    var home = conn('home');
+    if (!home) return;
+    var sm = home.map[Number(t.dataset.sensorIdx)];
+    if (!sm) return;
+    sm[t.dataset.sensorField] = t.value;
+    return;
+  }
+
+  if (t.dataset.widgetField !== undefined) {
+    var dash = currentDashboard();
+    if (!dash) return;
+    var inst = dash.rows[Number(t.dataset.row)][Number(t.dataset.idx)];
+    if (!inst) return;
+    var wfield = t.dataset.widgetField;
+    if (wfield === 'divider') inst.divider = t.checked;
+    else inst[wfield] = t.value;
+    if (wfield === 'slot') renderDashboards();  // бейдж источника зависит от слота
+    else drawPreview();
+    return;
+  }
+
+  if (t.id === 'dash-name') {
+    var d = currentDashboard();
+    if (d) d.name = t.value;
+    drawPreview();
+    return;
+  }
+
+  if (t.id === 'palette-slot' && state.paletteSubType) { state.paletteSubType.slot = t.value; return; }
+  if (t.id === 'palette-label' && state.paletteSubType) { state.paletteSubType.label = t.value; return; }
+
+  if (t.id === 'add-sensor-slot') { el('add-sensor-custom').hidden = t.value !== '__custom'; return; }
+
+  if (t.id === 'device-city') { state.city = t.value; updateCityHint(); return; }
+  if (t.id === 'device-name') { updateDeviceNameHint(t.value); return; }
+}
+// 'change' — для чекбоксов и select (не все браузеры шлют 'input' по клику
+// на checkbox одинаково надёжно), 'input' — для текстовых полей.
+document.addEventListener('input', handleFieldChange);
+document.addEventListener('change', handleFieldChange);
+
+// Запись настроек разрешена из любой сети (docs/decisions.md, п.8) — гейта
+// «только из точки доступа» на странице больше нет, кнопки всегда активны.
+function save() {
+  if (!state.loaded) {
+    setStatus('настройки ещё не загружены — обновите страницу');
+    return;
+  }
   var payload = {
     device_name: el('device-name').value || 'inkroam-setup',
     timezone_minutes: state.timezone_minutes,
-    city: el('device-city').value || 'Екатеринбург',
+    city: state.city || 'Екатеринбург',
     networks: state.networks.map(function (n) { return { ssid: n.ssid, password: n.password || '' }; }),
     connectors: state.connectors.filter(function (c) { return c.id; }).map(function (c) {
       return {
         id: c.id, kind: c.kind, url: c.url, interval: c.interval,
-        token: c.token || '', insecure: !!c.insecure
+        token: c.token || '', refresh_token: c.refresh_token || '', username: c.username || '',
+        insecure: !!c.insecure, map: c.map || []
       };
     })
   };
+
+  if (state.dashboardsSupported) {
+    payload.dashboards = state.dashboards.map(function (d) {
+      return { name: d.name || '', rows: d.rows.map(function (row) { return row.map(serializeInstance); }) };
+    });
+    payload.active_dashboard = state.activeDashboard;
+  }
 
   setStatus('сохраняем…');
   fetchJSON('/api/config', {
@@ -581,21 +1356,35 @@ function doSave() {
     body: JSON.stringify(payload)
   }).then(function () {
     setStatus('сохранено');
-    return loadConfig();
+    return loadWidgetsCatalog().then(function () { return loadConfig(); });
   }).catch(function (err) { setStatus('не сохранилось: ' + err.message); });
 }
 
-function reboot() {
-  if (!state.canWrite) {
-    setStatus('перезагрузка запрещена: подключитесь к точке доступа устройства');
-    return;
-  }
-  if (!confirm('Перезагрузить устройство?')) return;
-  setStatus('перезагружаем…');
-  fetch('/api/reboot', { method: 'POST' }).catch(function () {});
+// slot/label — только непустые, divider — только true (экономия NVS, то же
+// правило, что у to_json дашбордов в прошивке).
+function serializeInstance(inst) {
+  var o = { type: inst.type, size: inst.size };
+  if (inst.divider) o.divider = true;
+  if (inst.slot) o.slot = inst.slot;
+  if (inst.label) o.label = inst.label;
+  return o;
 }
 
-loadConfig();
+function reboot() {
+  if (!confirm('Перезагрузить устройство?')) return;
+  setStatus('перезагружаем…');
+  // JSON-тело обязательно: устройство принимает reboot только как
+  // application/json — иначе любая чужая страница могла бы перезагружать его
+  // простой формой (CSRF), пока страница настройки открыта из той же сети.
+  fetch('/api/reboot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .catch(function () {});
+}
+
+function boot() {
+  loadWidgetsCatalog().then(function () { return loadConfig(); });
+  pollStatus();
+}
+boot();
 </script>
 </body>
 </html>

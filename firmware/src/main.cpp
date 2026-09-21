@@ -12,6 +12,7 @@
 
 #include "battery.h"
 #include "board.h"
+#include "buttons.h"
 #include "config.h"
 #include "connectors.h"
 #include "display.h"
@@ -19,6 +20,7 @@
 #include "netman.h"
 #include "portal.h"
 #include "slots.h"
+#include "widgets/demand.h"
 
 namespace {
 
@@ -38,10 +40,23 @@ uint32_t g_last_redraw = 0;
 uint32_t g_last_full_refresh = 0;
 uint32_t g_last_content_hash = 0;
 
+// Кнопка только что переключила дашборд — перерисовать немедленно, минуя
+// пятиминутный интервал частичного обновления (buttons.h, короткое
+// нажатие): владелец нажал кнопку и ждёт смены экрана сейчас, а не через
+// пять минут.
+bool g_force_redraw = false;
+
 // Хэш содержимого слотов — что реально видно на экране. Время в него не
 // входит намеренно: иначе каждая минута выглядела бы как «изменение».
-uint32_t content_hash(const slots::Store& store) {
+// active_dashboard подмешан: смена дашборда меняет то, что нарисовано,
+// даже когда сами слоты не изменились ни на бит — без этого поля переход
+// на другой экран ждал бы случайного изменения данных, чтобы попасть в
+// content_changed (g_force_redraw закрывает это для НЕМЕДЛЕННОЙ перерисовки,
+// но хэш должен отражать смену и для последующих обычных сравнений).
+uint32_t content_hash(const slots::Store& store, uint8_t active_dashboard) {
     uint32_t h = 2166136261u;  // FNV-1a
+    h ^= active_dashboard;
+    h *= 16777619u;
     for (const auto& kv : store.all()) {
         const slots::Slot& sl = kv.second;
         for (const char* p = kv.first.c_str(); *p; ++p) { h ^= static_cast<uint8_t>(*p); h *= 16777619u; }
@@ -122,8 +137,18 @@ void redraw() {
     // появится.
     device.now = now_seconds();
     device.next_update_at = device.now + PARTIAL_MIN_INTERVAL_MS / 1000;
-    device.timezone_minutes = netman::settings().timezone_minutes;
-    display::show_frame(g_slots, device);
+    const config::Settings& settings = netman::settings();
+    device.timezone_minutes = settings.timezone_minutes;
+
+    // dashboards всегда ровно три, active_dashboard всегда 0..2 — инвариант,
+    // который держат config::defaults()/from_json (config.cpp). Проверка
+    // границ здесь — не «а вдруг», а защита от рисования по мусорному
+    // индексу, если это когда-нибудь перестанет быть истиной.
+    static const config::Dashboard kEmptyDashboard;
+    const config::Dashboard& dashboard = settings.active_dashboard < settings.dashboards.size()
+                                              ? settings.dashboards[settings.active_dashboard]
+                                              : kEmptyDashboard;
+    display::show_frame(g_slots, device, dashboard);
 }
 
 }  // namespace
@@ -136,6 +161,7 @@ void setup() {
     display::begin();
     display::show_boot_screen();
     battery::begin();
+    buttons::begin();
 
     netman::begin(config::load());
     portal::begin();
@@ -151,6 +177,36 @@ void loop() {
     // обновлялся бы только отрисовкой, и цикл рисовал бы кадр за кадром,
     // пока ждёт синхронизацию, — непрерывный износ панели без NTP.
     now_seconds();
+
+    // Кнопки платы — до чтения режима сети ниже: долгое BTN1 меняет режим
+    // прямо здесь (netman::force_access_point() не асинхронна, в отличие от
+    // netman::reload()), и остаток этого тика должен увидеть уже новый режим.
+    const buttons::Event btn = buttons::poll(millis());
+    if (btn.kind == buttons::Kind::kShort) {
+        // Короткое 1/2/3 — переключить дашборд. config::save() тем же путём,
+        // что и сохранение формы на портале (portal.cpp, handle_post_config):
+        // NVS остаётся единственным источником истины.
+        config::Settings settings = netman::settings();
+        settings.active_dashboard = btn.index;
+        if (config::save(settings)) {
+            // reload_now(), не reload(): мы в главном цикле, и кадр ниже в этом
+            // же тике должен взять уже новый active_dashboard из netman::settings().
+            netman::reload_now();
+            g_force_redraw = true;
+            Serial.printf("buttons: короткое BTN%u — дашборд %u\n",
+                          static_cast<unsigned>(btn.index + 1), static_cast<unsigned>(btn.index));
+        } else {
+            // save() отказал (потолок NVS-blob) — переключать нечего: reload_now
+            // прочитал бы прежний дашборд, а кнопка выглядела бы сломанной молча.
+            Serial.println("buttons: настройки не сохранились — дашборд не переключён");
+        }
+    } else if (btn.kind == buttons::Kind::kLong && btn.index == 0) {
+        // Долгое BTN1 — точка доступа по требованию, даже если сейчас есть
+        // рабочая сеть (docs/widgets.md): без сохранённых сетей рядом это
+        // единственный способ снова достучаться до страницы настройки.
+        Serial.println("buttons: долгое BTN1 — принудительная точка доступа");
+        netman::force_access_point();
+    }
 
     // Точка доступа только что поднялась (при старте или после неудачной
     // попытки вернуться в сохранённую сеть) — пароль на панели рисуем сразу,
@@ -192,7 +248,11 @@ void loop() {
     // всё равно не дотянуться, а кадр нужен.
     const bool clock_ready = g_time_synced || millis() > 20'000;
     if (netman::mode() == netman::Mode::kStation && clock_ready) {
-        connectors::poll_due(netman::settings(), g_slots, now_seconds());
+        // По всем трём дашбордам, не только активному — переключение кнопкой
+        // должно показать данные сразу, а не ждать первого опроса после
+        // смены экрана (widgets::compute_demand, docs/widgets.md).
+        const widgets::Demand demand = widgets::compute_demand(netman::settings());
+        connectors::poll_due(netman::settings(), g_slots, now_seconds(), demand);
 
         // Снимок состояния для /api/status — из главного цикла, где хранилище
         // и живёт. Диагностика без кабеля: «почему пусто на экране» отвечает
@@ -211,10 +271,12 @@ void loop() {
             for (const auto& kv : g_slots.all()) {
                 const slots::Slot& sl = kv.second;
                 JsonObject o = slots_obj[kv.first].to<JsonObject>();
+                // Значения слотов (text) наружу не отдаём вовсе: /api/status
+                // открыт всей сети, а /api/config пишется из любой сети — иначе
+                // чужой мог бы привязать к слоту произвольную сущность HA или
+                // внутренний адрес и прочитать ответ здесь (ревью 2026-09-21).
+                // Для «почему пусто на экране» хватает ok/error/age.
                 o["ok"] = sl.ok;
-                if (!kv.first.startsWith("mail.") || kv.first == "mail.unread") {
-                    o["text"] = sl.text;
-                }
                 o["error"] = sl.error;
                 o["age"] = sl.at ? (now - sl.at) : 0;
                 o["ttl"] = sl.ttl;
@@ -238,12 +300,16 @@ void loop() {
     // Частичное обновление — только когда есть что показать нового и не чаще
     // раза в 5 минут; полное — раз в час независимо от содержимого (внутри
     // redraw). В режиме точки доступа кадр статичный, там свой отсев.
-    const bool content_changed = content_hash(g_slots) != g_last_content_hash;
+    // g_force_redraw (кнопка сменила дашборд) обходит пятиминутный интервал —
+    // владелец ждёт смену экрана сейчас, а не по расписанию.
+    const uint8_t active_dashboard = netman::settings().active_dashboard;
+    const bool content_changed = content_hash(g_slots, active_dashboard) != g_last_content_hash;
     const bool interval_passed = now - g_last_redraw >= PARTIAL_MIN_INTERVAL_MS;
     const bool full_due = now - g_last_full_refresh >= FULL_REFRESH_INTERVAL_MS;
     const bool first_frame = g_last_redraw == 0;
-    if (first_frame || full_due || (content_changed && interval_passed)) {
-        g_last_content_hash = content_hash(g_slots);
+    if (first_frame || full_due || g_force_redraw || (content_changed && interval_passed)) {
+        g_last_content_hash = content_hash(g_slots, active_dashboard);
+        g_force_redraw = false;
         redraw();
         g_last_redraw = now;
     }

@@ -1,5 +1,6 @@
 #include "netman.h"
 
+#include <ESPmDNS.h>  // MDNS.begin — страница доступна как http://<имя>.local/ из домашней сети
 #include <WiFi.h>
 
 #include <atomic>
@@ -26,6 +27,11 @@ constexpr uint32_t kConnectPollMs = 200;
 // стек, не слишком редко — иначе дома владелец ждёт минуты вместо секунд.
 constexpr uint32_t kApRetryIntervalMs = 60000;
 
+// Долгое удержание BTN1 (buttons.h) поднимает точку доступа принудительно —
+// на этот срок ретрай в станцию не пробуется вовсе, даже без подключённого
+// AP-клиента (см. force_access_point()/forced_hold_until ниже).
+constexpr uint32_t kForcedApHoldMs = 3 * 60 * 1000;
+
 // Кратковременный провал WiFi.status() (роутер на секунду перезагрузился,
 // доля секунды роуминга) не должен сразу ронять устройство в точку доступа —
 // это дороже: рвётся станционное соединение, и через минуту снова придётся
@@ -35,6 +41,10 @@ constexpr uint32_t kDisconnectGraceMs = 5000;
 config::Settings current_settings;
 Mode current_mode = Mode::kConnecting;
 uint32_t last_retry_at = 0;
+// 0 — обычный режим (ретраи по kApRetryIntervalMs); millis() до этого
+// значения — принудительная точка доступа (force_access_point()) держится
+// вне зависимости от обычного расписания ретрая.
+uint32_t forced_hold_until = 0;
 uint32_t disconnected_since_ms = 0;  // 0 — сейчас подключены или ещё не фиксировали разрыв
 
 String current_ap_ssid;
@@ -168,6 +178,25 @@ void start_access_point(const config::Settings& settings) {
                   WiFi.softAPIP().toString().c_str());
 }
 
+// Объявляет устройство в mDNS под его именем — страница настройки после
+// этого открывается как http://<device_name>.local/ из той же сети, не
+// только по IP (который меняется от сети к сети). Зовётся при каждом входе
+// в станционный режим, не один раз при старте: DHCP каждой новой сети даёт
+// новый IP, а mDNS-запись нужно переобъявлять тоже — сам MDNS.begin() не
+// умеет "обновить IP" по требованию, только полную переинициализацию.
+void announce_mdns(const config::Settings& settings) {
+    String name = settings.device_name.isEmpty() ? "inkroam-setup" : settings.device_name;
+    // MDNS.begin() на уже поднятом стеке падает в mdns_init() с
+    // ESP_ERR_INVALID_STATE до установки имени — без end() второй вход в
+    // станцию (и смена имени на странице) оставлял бы старую запись.
+    MDNS.end();
+    if (MDNS.begin(name.c_str())) {
+        Serial.printf("netman: mDNS — http://%s.local/\n", name.c_str());
+    } else {
+        Serial.println("netman: mDNS не поднялся — страница доступна только по IP");
+    }
+}
+
 }  // namespace
 
 std::vector<ScanResult> scan() {
@@ -263,6 +292,7 @@ void begin(const config::Settings& settings) {
     if (try_connect_best(settings)) {
         current_mode = Mode::kStation;
         Serial.printf("netman: подключено, IP %s\n", WiFi.localIP().toString().c_str());
+        announce_mdns(settings);
     } else {
         start_access_point(settings);
         current_mode = Mode::kAccessPoint;
@@ -317,6 +347,12 @@ void loop() {
             return;
         }
 
+        // Принудительная точка (долгое BTN1, force_access_point()) держится
+        // без ретрая заданный срок независимо от обычного расписания —
+        // владелец только что попросил её явно, откатывать её раньше, чем он
+        // успеет открыть страницу, было бы против его прямого намерения.
+        if (millis() < forced_hold_until) return;
+
         if (millis() - last_retry_at < kApRetryIntervalMs) return;
         last_retry_at = millis();
 
@@ -326,6 +362,7 @@ void loop() {
             WiFi.softAPdisconnect(/*wifioff=*/false);  // радио остаётся в AP_STA, гасим только вещание
             current_mode = Mode::kStation;
             Serial.printf("netman: вернулись в сеть, IP %s\n", WiFi.localIP().toString().c_str());
+            announce_mdns(current_settings);
         }
         return;
     }
@@ -355,6 +392,20 @@ void loop() {
     }
     disconnected_since_ms = 0;
 }
+
+void force_access_point() {
+    // Зовётся из главного цикла (main.cpp, buttons::poll()) — тем же путём,
+    // что и loop() выше, поэтому current_settings/current_mode можно трогать
+    // напрямую, без флага (в отличие от reload(), которую зовёт задача
+    // async_tcp — см. её комментарий про settings_reload_pending).
+    start_access_point(current_settings);
+    current_mode = Mode::kAccessPoint;
+    last_retry_at = millis();
+    forced_hold_until = millis() + kForcedApHoldMs;
+    connect_now = false;
+}
+
+void reload_now() { current_settings = config::load(); }
 
 void reload(const config::Settings& settings) {
     // settings здесь не используется намеренно: portal.cpp вызывает

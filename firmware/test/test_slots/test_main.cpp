@@ -5,8 +5,32 @@
 // бинарник (test_build_src не включён в platformio.ini, а трогать его не
 // входит в эту задачу), так что единственный способ протестировать код из
 // firmware/src на хосте — включить его прямо сюда.
+//
+// widgets::compute_demand (widgets/demand.cpp) зовёт widgets::find/
+// required_slots (widgets/registry.cpp), а тот ссылается на Spec каждого
+// зарегистрированного виджета (widgets/w_*.cpp) — чтобы всё слинковалось в
+// одной единице трансляции, тянем сюда и их, а вместе с ними и то, что нужно
+// им самим (layout.cpp, canvas/font/wifi_qr) — тот же приём, что в
+// test_layout/test_main.cpp.
 #include <unity.h>
 
+#include "../../src/canvas.cpp"
+#include "../../src/canvas_mem.cpp"
+#include "../../src/font.cpp"
+#include "../../src/wifi_qr.cpp"
+#include "../../src/widgets/types.cpp"
+#include "../../src/widgets/prims.cpp"
+#include "../../src/widgets/w_markets.cpp"
+#include "../../src/widgets/w_limits.cpp"
+#include "../../src/widgets/w_air.cpp"
+#include "../../src/widgets/w_limits_air.cpp"
+#include "../../src/widgets/w_mail.cpp"
+#include "../../src/widgets/w_today.cpp"
+#include "../../src/widgets/w_metric.cpp"
+#include "../../src/widgets/w_text.cpp"
+#include "../../src/widgets/registry.cpp"
+#include "../../src/layout.cpp"
+#include "../../src/widgets/demand.cpp"
 #include "../../src/slots.cpp"
 #include "../../src/connectors.cpp"
 
@@ -1001,6 +1025,267 @@ static void test_status_placeholder_removed_when_connector_recovers(void) {
     TEST_ASSERT_NOT_NULL(store.find(String("limit.claude.5h")));
 }
 
+// ── Schedule: расписание опроса и пауза по Retry-After ──
+//
+// Живой случай: Anthropic отвечал 429 с Retry-After≈340 с на опрос раз в
+// 300 с — каждый запрос попадал в открытое окно, лимиты стояли часами.
+// Пауза должна держать опрос за пределами окна, а потом вернуть обычный ритм.
+
+static config::Connector schedule_connector(const char* id) {
+    config::Connector c;
+    c.id = id;
+    c.kind = "anthropic";
+    c.interval = 300;
+    return c;
+}
+
+static void test_schedule_polls_unknown_connector_immediately() {
+    connectors::Schedule s;
+    TEST_ASSERT_TRUE(s.should_poll(String("claude"), 300, 1000));
+}
+
+static void test_schedule_waits_interval_after_poll() {
+    connectors::Schedule s;
+    s.mark_polled(String("claude"), 1000);
+    TEST_ASSERT_FALSE(s.should_poll(String("claude"), 300, 1299));
+    TEST_ASSERT_TRUE(s.should_poll(String("claude"), 300, 1300));
+}
+
+static void test_schedule_hold_blocks_past_interval() {
+    connectors::Schedule s;
+    s.mark_polled(String("claude"), 1000);
+    s.hold(String("claude"), 1000 + 342 + 30);  // Retry-After с живого + запас
+    TEST_ASSERT_FALSE(s.should_poll(String("claude"), 300, 1300));  // интервал истёк, пауза — нет
+    TEST_ASSERT_FALSE(s.should_poll(String("claude"), 300, 1371));
+    TEST_ASSERT_TRUE(s.should_poll(String("claude"), 300, 1372));
+    TEST_ASSERT_EQUAL_UINT32(1372, s.held_until(String("claude")));
+}
+
+static void test_schedule_hold_is_per_connector() {
+    connectors::Schedule s;
+    s.hold(String("claude"), 5000);
+    TEST_ASSERT_FALSE(s.should_poll(String("claude"), 300, 1000));
+    TEST_ASSERT_TRUE(s.should_poll(String("codex"), 300, 1000));
+    TEST_ASSERT_EQUAL_UINT32(0, s.held_until(String("codex")));
+}
+
+static void test_schedule_forget_missing_drops_removed_connector() {
+    connectors::Schedule s;
+    s.mark_polled(String("claude"), 1000);
+    s.hold(String("claude"), 9000);
+    std::vector<config::Connector> configured;
+    configured.push_back(schedule_connector("codex"));
+    s.forget_missing(configured);
+    // Ни последнего опроса, ни паузы у удалённого не осталось.
+    TEST_ASSERT_TRUE(s.should_poll(String("claude"), 300, 1001));
+    TEST_ASSERT_EQUAL_UINT32(0, s.held_until(String("claude")));
+}
+
+static void test_schedule_forget_missing_keeps_configured() {
+    connectors::Schedule s;
+    s.mark_polled(String("codex"), 1000);
+    std::vector<config::Connector> configured;
+    configured.push_back(schedule_connector("codex"));
+    s.forget_missing(configured);
+    TEST_ASSERT_FALSE(s.should_poll(String("codex"), 300, 1100));
+}
+
+// ── connectors::provides — какой коннектор даёт какой слот
+// (widgets::compute_demand спрашивает это по каждому нужному виджетам слоту) ──
+
+static config::Connector http_connector_with_slot(const char* slot) {
+    config::Connector c;
+    c.id = "rates";
+    c.kind = "http";
+    config::SlotMapping m;
+    m.slot = slot;
+    c.map.push_back(m);
+    return c;
+}
+
+static void test_provides_http_matches_exact_map_slot() {
+    config::Connector c = http_connector_with_slot("btc");
+    TEST_ASSERT_TRUE(connectors::provides(c, String("btc")));
+    TEST_ASSERT_FALSE(connectors::provides(c, String("eur_rub")));
+}
+
+static void test_provides_http_matches_slot_prefix() {
+    config::Connector c = http_connector_with_slot("weather");
+    TEST_ASSERT_TRUE(connectors::provides(c, String("weather.temp")));
+    // "weathership" не начинается с "weather." (с точкой) — не должен
+    // ложно совпасть по случайному текстовому префиксу без разделителя.
+    TEST_ASSERT_FALSE(connectors::provides(c, String("weathership")));
+}
+
+static void test_provides_anthropic_matches_claude_limit_slots() {
+    config::Connector c;
+    c.kind = "anthropic";
+    TEST_ASSERT_TRUE(connectors::provides(c, String("limit.claude.5h")));
+    TEST_ASSERT_FALSE(connectors::provides(c, String("limit.codex")));
+}
+
+static void test_provides_codex_matches_codex_limit_slots() {
+    config::Connector c;
+    c.kind = "codex";
+    TEST_ASSERT_TRUE(connectors::provides(c, String("limit.codex")));
+    TEST_ASSERT_FALSE(connectors::provides(c, String("limit.claude.5h")));
+}
+
+static void test_provides_imap_matches_mail_slots() {
+    config::Connector c;
+    c.kind = "imap";
+    TEST_ASSERT_TRUE(connectors::provides(c, String("mail.unread")));
+}
+
+static void test_provides_geocode_matches_weather_slots() {
+    // geocode сам не кладёт ни одного слота — он готовит координаты для
+    // "weather" (Settings.city_lat/lon). Нужен weather.* -> нужен и он.
+    config::Connector c;
+    c.kind = "geocode";
+    TEST_ASSERT_TRUE(connectors::provides(c, String("weather.temp")));
+    TEST_ASSERT_FALSE(connectors::provides(c, String("co2")));
+}
+
+static void test_provides_unknown_kind_matches_nothing() {
+    config::Connector c;
+    c.kind = "none";
+    TEST_ASSERT_FALSE(connectors::provides(c, String("btc")));
+}
+
+// ── widgets::compute_demand — потребности виджетов по всем трём дашбордам ──
+
+static config::Settings settings_with_dashboard_row(std::initializer_list<widgets::Instance> row0) {
+    config::Settings settings;
+    config::Dashboard db;
+    for (const auto& item : row0) db.rows[0].push_back(item);
+    settings.dashboards.push_back(db);
+    settings.dashboards.push_back(config::Dashboard{});
+    settings.dashboards.push_back(config::Dashboard{});
+    return settings;
+}
+
+static widgets::Instance instance_of(const char* type) {
+    widgets::Instance i;
+    i.type = type;
+    return i;
+}
+
+static void test_compute_demand_connector_without_widget_is_not_needed() {
+    config::Settings settings = settings_with_dashboard_row({instance_of("markets")});
+    config::Connector mail;
+    mail.id = "mail";
+    mail.kind = "imap";
+    mail.interval = 900;
+    settings.connectors.push_back(mail);
+
+    widgets::Demand demand = widgets::compute_demand(settings);
+    TEST_ASSERT_FALSE(demand.needs(String("mail")));
+}
+
+static void test_compute_demand_connector_with_widget_is_needed() {
+    config::Settings settings = settings_with_dashboard_row({instance_of("mail")});
+    config::Connector mail;
+    mail.id = "mail";
+    mail.kind = "imap";
+    mail.interval = 900;
+    settings.connectors.push_back(mail);
+
+    widgets::Demand demand = widgets::compute_demand(settings);
+    TEST_ASSERT_TRUE(demand.needs(String("mail")));
+    TEST_ASSERT_EQUAL_UINT32(900, demand.refresh_seconds(String("mail")));  // widgets::mail — 900с
+}
+
+static void test_compute_demand_takes_minimum_refresh_across_widgets() {
+    // "air" (300с) и metric на co2 (300с) оба зависят от того же коннектора
+    // с map slot="co2" — но metric на weather.temp (300с) тоже подойдёт;
+    // возьмём air (300с) и явный metric с более быстрым требованием (0 —
+    // text не в счёт, тут просто демонстрация min: air=300, второй тоже 300,
+    // поэтому проверяем на паре air/today, у которых refresh разный: 300 и
+    // 1800 — минимум должен быть 300.
+    widgets::Instance air = instance_of("air");
+    widgets::Instance today = instance_of("today");
+    config::Settings settings = settings_with_dashboard_row({air, today});
+
+    config::Connector home;
+    home.id = "home";
+    home.kind = "homeassistant";
+    config::SlotMapping co2_map;
+    co2_map.slot = "co2";
+    home.map.push_back(co2_map);
+    config::SlotMapping weather_map;
+    weather_map.slot = "weather.temp";
+    home.map.push_back(weather_map);  // тот же коннектор отдаёт оба слота
+    home.interval = 300;
+    settings.connectors.push_back(home);
+
+    widgets::Demand demand = widgets::compute_demand(settings);
+    TEST_ASSERT_TRUE(demand.needs(String("home")));
+    TEST_ASSERT_EQUAL_UINT32(300, demand.refresh_seconds(String("home")));  // min(300 air, 1800 today)
+}
+
+static void test_compute_demand_geocode_follows_weather() {
+    config::Settings settings = settings_with_dashboard_row({instance_of("today")});
+
+    config::Connector weather;
+    weather.id = "weather";
+    weather.kind = "weather";
+    config::SlotMapping temp_map;
+    temp_map.slot = "weather.temp";
+    weather.map.push_back(temp_map);
+    settings.connectors.push_back(weather);
+
+    config::Connector geocode;
+    geocode.id = "geocode";
+    geocode.kind = "geocode";
+    settings.connectors.push_back(geocode);
+
+    widgets::Demand demand = widgets::compute_demand(settings);
+    TEST_ASSERT_TRUE(demand.needs(String("weather")));
+    TEST_ASSERT_TRUE(demand.needs(String("geocode")));
+}
+
+static void test_compute_demand_checks_all_three_dashboards_not_only_first() {
+    config::Settings settings;
+    settings.dashboards.push_back(config::Dashboard{});  // активный — пустой
+    config::Dashboard second;
+    second.rows[0].push_back(instance_of("mail"));
+    settings.dashboards.push_back(second);
+    settings.dashboards.push_back(config::Dashboard{});
+
+    config::Connector mail;
+    mail.id = "mail";
+    mail.kind = "imap";
+    mail.interval = 900;
+    settings.connectors.push_back(mail);
+
+    widgets::Demand demand = widgets::compute_demand(settings);
+    TEST_ASSERT_TRUE(demand.needs(String("mail")));
+}
+
+static void test_mark_failed_with_data_still_records_reason_slot() {
+    // Тёплый путь: данные уже были, потом отказ с причиной — причина обязана
+    // появиться в `<id>.status`, иначе блок лимитов исчезает молча (ревью).
+    slots::Store store;
+    slots::Slot v; v.number = 42; v.ok = true; v.at = 1000; v.ttl = 300;
+    store.put(String("limit.claude.5h"), v, String("claude"));
+    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
+    const slots::Slot* st = store.find(String("claude.status"));
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_FALSE(st->ok);
+    TEST_ASSERT_EQUAL_STRING("сервер просит подождать (429)", st->error.c_str());
+    TEST_ASSERT_FALSE(store.find(String("limit.claude.5h"))->ok);
+}
+
+static void test_put_after_warm_failure_clears_reason_slot() {
+    slots::Store store;
+    slots::Slot v; v.number = 42; v.ok = true; v.at = 1000; v.ttl = 300;
+    store.put(String("limit.claude.5h"), v, String("claude"));
+    store.mark_failed(String("claude"), String("429"));
+    v.at = 2000;
+    store.put(String("limit.claude.5h"), v, String("claude"));
+    TEST_ASSERT_NULL(store.find(String("claude.status")));
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -1134,7 +1419,29 @@ int main() {
 
     RUN_TEST(test_mark_failed_without_slots_creates_status_placeholder);
     RUN_TEST(test_mark_failed_without_reason_creates_nothing);
+    RUN_TEST(test_schedule_polls_unknown_connector_immediately);
+    RUN_TEST(test_schedule_waits_interval_after_poll);
+    RUN_TEST(test_schedule_hold_blocks_past_interval);
+    RUN_TEST(test_schedule_hold_is_per_connector);
+    RUN_TEST(test_schedule_forget_missing_drops_removed_connector);
+    RUN_TEST(test_schedule_forget_missing_keeps_configured);
+    RUN_TEST(test_mark_failed_with_data_still_records_reason_slot);
+    RUN_TEST(test_put_after_warm_failure_clears_reason_slot);
     RUN_TEST(test_status_placeholder_removed_when_connector_recovers);
+
+    RUN_TEST(test_provides_http_matches_exact_map_slot);
+    RUN_TEST(test_provides_http_matches_slot_prefix);
+    RUN_TEST(test_provides_anthropic_matches_claude_limit_slots);
+    RUN_TEST(test_provides_codex_matches_codex_limit_slots);
+    RUN_TEST(test_provides_imap_matches_mail_slots);
+    RUN_TEST(test_provides_geocode_matches_weather_slots);
+    RUN_TEST(test_provides_unknown_kind_matches_nothing);
+
+    RUN_TEST(test_compute_demand_connector_without_widget_is_not_needed);
+    RUN_TEST(test_compute_demand_connector_with_widget_is_needed);
+    RUN_TEST(test_compute_demand_takes_minimum_refresh_across_widgets);
+    RUN_TEST(test_compute_demand_geocode_follows_weather);
+    RUN_TEST(test_compute_demand_checks_all_three_dashboards_not_only_first);
 
     return UNITY_END();
 }

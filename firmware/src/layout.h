@@ -4,9 +4,10 @@
 // его инварианты (кегли из сетки Terminus, прочерк вместо нуля, пометка
 // устаревшего, ни одного обязательного блока).
 //
-// Соглашение об именах слотов, которые ищет раскладка (коннекторы настраивает
-// владелец через страницу настройки, эти имена — просто то, что блоки ищут в
-// Store; коннектор без такой карты для блока просто не даёт ему появиться):
+// Соглашение об именах слотов, которые ищут виджеты (widgets/w_*.cpp;
+// коннекторы настраивает владелец через страницу настройки, эти имена —
+// просто то, что виджеты ищут в Store; коннектор без такой карты для слота
+// просто не даёт виджету появиться):
 //
 //   btc, usd_rub, eur_rub          — number: курс; delta: изменение за 24ч, %
 //   limit.claude.5h                — number: занято окна 0..100
@@ -26,21 +27,31 @@
 //   weather.summary                — text: краткое описание погоды
 //   event.N.at / .title            — text, N = 1..3 (ближайшие события)
 //
-// Сетка — точное воспроизведение trmnl-ink/renderer/app/templates/cockpit.html
-// (эталон: reference/cockpit-reference.png, обмеры — Status Log в
-// .claude/plans/inkroam.md). Верхний ряд — ДВЕ колонки, не три: слева Рынки
-// (фиксированная ширина ~296px, как flex:none в cockpit.html), справа гибкая
-// колонка, где друг под другом стоят Лимиты и Воздух (сама эта колонка
-// исчезает целиком, только если пропали оба). Нижний ряд — тоже две колонки,
-// но наоборот: справа Сегодня фиксированной ширины (~202px), слева гибкая
-// Почта. Колонка без единого видимого блока не резервирует место — сосед
-// получает всю ширину ряда.
+// Сетка собирается из активного дашборда (config::Dashboard, config.h) —
+// два ряда виджетов, ширина каждого — токен S/M/flex (widgets::Size,
+// layout_row ниже). Заводской «Стол» воспроизводит дословно
+// trmnl-ink/renderer/app/templates/cockpit.html (эталон:
+// reference/cockpit-reference.png, обмеры — Status Log в
+// .claude/plans/inkroam.md): верхний ряд — Рынки (M, 296px) слева и гибкая
+// колонка Лимиты+Воздух справа, нижний — гибкая Почта слева и Сегодня (S,
+// 202px) справа. Виджет без единого видимого слота не резервирует место —
+// соседи по ряду делят освободившееся пространство (docs/widgets.md).
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "canvas.h"
 #include "slots.h"
+#include "widgets/types.h"
+
+// Только объявление типа — draw_frame() ниже берёт дашборд по ссылке, самого
+// определения (config::Dashboard) заголовку знать не нужно. config.h тянет
+// сети, коннекторы, NVS — раскладке из этого нужен только один тип, полный
+// #include "config.h" был бы лишней связью на уровне заголовка.
+namespace config {
+struct Dashboard;
+}
 
 namespace layout {
 
@@ -95,13 +106,12 @@ bool has_data(const slots::Slot* s);
 String format_percent(const slots::Slot* s, uint32_t now);
 String format_value(const slots::Slot* s, uint32_t now, int decimals, const char* suffix);
 
-// Видимость блоков верхнего и нижнего ряда — по наличию хотя бы одного из их
-// слотов. Источник отвалился целиком — блок не резервирует место соседям.
-bool rates_visible(const slots::Store& store);
-bool limits_visible(const slots::Store& store);
-bool air_visible(const slots::Store& store);
-bool mail_visible(const slots::Store& store);
-bool today_visible(const slots::Store& store);
+// Видимость блока по наличию хотя бы одного из его слотов — раньше жила
+// здесь пятью функциями (rates_visible/limits_visible/...), теперь это
+// widgets::Spec::visible каждого виджета (widgets/w_*.cpp): раскладка не
+// должна знать имена слотов конкретных блоков, это знание принадлежит
+// самому виджету (docs/widgets.md). Источник отвалился целиком — виджет не
+// резервирует место соседям (см. layout_row ниже).
 
 // Раскладывает `total` мест в ряд `row` шириной row.w с зазором gap. Место
 // резервируют только видимые (visible[i] == true) — невидимые получают
@@ -127,12 +137,28 @@ void compute_columns_fixed_second(Rect row, int16_t gap, bool first_visible, boo
 void compute_two_rows(Rect body, int16_t gap, bool row1_has, bool row2_has, Rect* row1,
                       Rect* row2);
 
+// Раскладывает виджеты ОДНОГО ряда дашборда по токенам размера (S/M/flex —
+// widgets::Size, docs/widgets.md, «Правило ряда»): видимые с фиксированным
+// размером (S/M) берут свои пиксели, flex делят остаток поровну между собой;
+// если среди видимых нет ни одного flex — видимые делят весь ряд поровну (так
+// в эталоне Рынки занимают всю ширину верхнего ряда, когда правая колонка
+// пропала: там n=1, «поровну» на одного — это вся ширина). Невидимый виджет
+// получает нулевой Rect и не резервирует место соседям — тот же принцип, что
+// у compute_columns выше, но по вектору Instance, а не по голому total.
+// items и out — одной длины; visible — тем же индексом.
+void layout_row(Rect row, int16_t gap, const std::vector<widgets::Instance>& items,
+                 const std::vector<bool>& visible, Rect* out);
+
 // ── рисование: единственная часть, которой нужна канва ──
 
-// Кадр целиком: шапка + пересобранная сетка. Рисуется всегда, даже когда
-// store пуст, — контракт «пустой снапшот должен отрендериться без падения»
-// (trmnl-ink/docs/frame-contract.md, инвариант 1).
-void draw_frame(canvas::Canvas& canvas, const slots::Store& store, const DeviceInfo& device);
+// Кадр целиком: шапка + дашборд, собранный по факту наличия данных виджетов
+// (widgets::Spec::visible/draw, widgets/registry.cpp). Рисуется всегда, даже
+// когда store пуст, — контракт «пустой снапшот должен отрендериться без
+// падения» (trmnl-ink/docs/frame-contract.md, инвариант 1); пустой дашборд
+// (config::Dashboard с пустыми rows, заводской «Свой») даёт кадр с одной
+// шапкой, ровно как раньше пустой store.
+void draw_frame(canvas::Canvas& canvas, const slots::Store& store, const DeviceInfo& device,
+                 const config::Dashboard& dashboard);
 
 // Кадр с учётными данными точки доступа (docs/decisions.md, п.8): имя сети и
 // пароль текстом — камера может не сработать, вводить руками должно быть чем

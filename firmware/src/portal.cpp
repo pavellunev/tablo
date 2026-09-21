@@ -11,6 +11,7 @@
 #include "config.h"
 #include "display.h"
 #include "netman.h"
+#include "widgets/widget.h"
 
 namespace portal {
 
@@ -46,39 +47,12 @@ void handle_status(AsyncWebServerRequest* request) {
     request->send(200, "application/json", copy);
 }
 
-// Разрешение писать настройки проверяется по интерфейсу, с которого физически
-// пришло TCP-соединение, а не по netman::mode() — глобальному состоянию, которое
-// в момент прихода запроса может уже не совпадать с тем, через какую сеть он
-// пришёл (см. docs/decisions.md, п.8 и разбор гонки STA/AP, из-за которой
-// прежняя схема была уязвима). Запрос через точку доступа физически не может
-// прийти иначе, чем предъявив пароль WPA2 на хендшейке, — сравнение адресов
-// здесь просто отличает эту сеть от станционной, саму защиту даёт не оно.
-bool authorized(AsyncWebServerRequest* request) {
-    // Два замка, и оба нужны.
-    //
-    // Режим — потому что `softAPIP()` возвращает 192.168.4.1 всегда, даже
-    // когда точка не поднята: netif создаётся безусловно и сконфигурирован
-    // заранее. Если чужая сеть выдаст устройству ровно этот адрес, сравнение
-    // ниже станет тождеством и запись откроется всей сети. Это не редкая
-    // случайность: устройство ассоциируется с любой точкой, вещающей
-    // сохранённое имя сети, а открытые сети гостиниц мы сохранять разрешаем —
-    // значит поднять фальшивую точку и раздать нужный адрес может кто угодно.
-    //
-    // Интерфейс — потому что режим это глобальное состояние, которое
-    // расходится с реальностью в переходные моменты. Как условие «разрешить»
-    // он однажды уже дал лишний доступ; здесь он может только отказать, а
-    // отказ безвреден: владелец нажмёт «Сохранить» ещё раз.
-    if (netman::mode() != netman::Mode::kAccessPoint) return false;
-
-    const IPAddress ap = WiFi.softAPIP();
-    if (ap == IPAddress()) return false;
-
-    return request->client()->localIP() == ap;
-}
-
-void send_forbidden(AsyncWebServerRequest* request) {
-    request->send(403, "application/json", "{\"ok\":false,\"error\":\"forbidden\"}");
-}
+// Запись настроек разрешена из любой сети, в которой устройство оказалось,
+// — не только из его точки доступа (docs/decisions.md, п.8: решение
+// пересмотрено владельцем, там же — что взамен). Секреты наружу всё так же не
+// отдаются (to_json без include_secrets), а сохранённый секрет не наследуется
+// коннектором, у которого сменился адрес (config.cpp, target_unchanged) — это
+// закрывает единственную атаку, ради которой гейт вводился.
 
 void handle_scan(AsyncWebServerRequest* request) {
     // scan_status(), не scan(): та блокирует на время реального Wi-Fi скана
@@ -108,15 +82,34 @@ void handle_scan(AsyncWebServerRequest* request) {
 
 void handle_get_config(AsyncWebServerRequest* request) {
     config::Settings settings = config::load();
-    String raw = config::to_json(settings, /*include_secrets=*/false);
+    request->send(200, "application/json", config::to_json(settings, /*include_secrets=*/false));
+}
 
-    // can_write — не часть сохранённых настроек, а факт про конкретный
-    // запрос: странице нужно честно сказать, можно ли отсюда вообще слать
-    // /api/config, а не подсовывать форму, запись из которой заведомо
-    // получит 403 (docs/decisions.md, п.8).
+// Реестр виджетов для палитры на странице настройки (docs/widgets.md):
+// добавить виджет — один файл widgets/w_<type>.cpp, страница подхватывает
+// его сама через этот эндпоинт, portal.cpp/index.html руками не трогая.
+void handle_get_widgets(AsyncWebServerRequest* request) {
     JsonDocument doc;
-    deserializeJson(doc, raw);
-    doc["can_write"] = authorized(request);
+    JsonArray arr = doc.to<JsonArray>();
+
+    size_t count = 0;
+    const widgets::Spec* const* specs = widgets::all(&count);
+    for (size_t i = 0; i < count; ++i) {
+        const widgets::Spec* spec = specs[i];
+        JsonObject o = arr.add<JsonObject>();
+        o["type"] = spec->type;
+        o["title"] = spec->title;
+        o["default_size"] = widgets::size_to_string(spec->default_size);
+        o["min_width"] = spec->min_width;
+        JsonArray slots = o["slots"].to<JsonArray>();
+        // metric не несёт статического списка слотов (widgets::Spec::slots
+        // == nullptr) — какой слот показывать, владелец выбирает при
+        // добавлении виджета на дашборд, здесь отдавать нечего.
+        for (const char* const* p = spec->slots; p != nullptr && *p != nullptr; ++p) {
+            slots.add(*p);
+        }
+        o["refresh"] = spec->refresh_seconds;
+    }
 
     String out;
     serializeJson(doc, out);
@@ -124,11 +117,6 @@ void handle_get_config(AsyncWebServerRequest* request) {
 }
 
 void handle_post_config(AsyncWebServerRequest* request, JsonVariant& json) {
-    if (!authorized(request)) {
-        send_forbidden(request);
-        return;
-    }
-
     // Настройки читаем заново перед слиянием: from_json достраивает
     // присланный JSON прежними секретами там, где поле пришло пустым — без
     // свежей копии из NVS «оставить как было» означало бы «стереть».
@@ -145,12 +133,11 @@ void handle_post_config(AsyncWebServerRequest* request, JsonVariant& json) {
     request->send(200, "application/json", "{\"ok\":true}");
 }
 
-void handle_reboot(AsyncWebServerRequest* request) {
-    if (!authorized(request)) {
-        send_forbidden(request);
-        return;
-    }
-
+// JsonVariant не используется — обработчик через AsyncCallbackJsonWebHandler
+// ради требования Content-Type: application/json: простой POST формой с чужой
+// страницы браузер отправит без предварительного запроса, JSON — нет. Так
+// открытая вкладка настройки не даёт другому сайту перезагружать устройство.
+void handle_reboot(AsyncWebServerRequest* request, JsonVariant&) {
     request->send(200, "application/json", "{\"ok\":true}");
     // Сам restart — не отсюда, а из portal::loop() в главном цикле: см.
     // reboot_pending выше.
@@ -194,8 +181,8 @@ void begin() {
     });
     server.on("/api/scan", HTTP_GET, handle_scan);
     server.on("/api/config", HTTP_GET, handle_get_config);
+    server.on("/api/widgets", HTTP_GET, handle_get_widgets);
     server.on("/api/status", HTTP_GET, handle_status);
-    server.on("/api/reboot", HTTP_POST, handle_reboot);
 
     // setMethod(HTTP_POST) явно: AsyncCallbackJsonWebHandler без него по
     // умолчанию принимает GET|POST|PUT|PATCH — GET-запрос доходил бы до
@@ -204,6 +191,9 @@ void begin() {
     auto* config_handler = new AsyncCallbackJsonWebHandler("/api/config", handle_post_config);
     config_handler->setMethod(HTTP_POST);
     server.addHandler(config_handler);
+    auto* reboot_handler = new AsyncCallbackJsonWebHandler("/api/reboot", handle_reboot);
+    reboot_handler->setMethod(HTTP_POST);
+    server.addHandler(reboot_handler);
 
     server.onNotFound(handle_not_found);
 

@@ -855,6 +855,76 @@ uint16_t extract_ha_history_values(const String& json_body, float* out, uint16_t
     return n;
 }
 
+namespace {
+
+bool has_prefix(const char* text, const char* prefix) {
+    return std::strncmp(text, prefix, std::strlen(prefix)) == 0;
+}
+
+}  // namespace
+
+bool provides(const config::Connector& c, const String& slot) {
+    // weather пишет weather.summary мимо карты (собирает из полей ответа) —
+    // считаем его владельцем всего пространства weather.*, не только map[].
+    if (c.kind == "weather" && has_prefix(slot.c_str(), "weather")) return true;
+    if (c.kind == "http" || c.kind == "homeassistant" || c.kind == "weather") {
+        for (const config::SlotMapping& m : c.map) {
+            if (m.slot == slot) return true;
+            // Префикс "m.slot." — карта может описывать не сам лист, а его
+            // "пространство" (например slot="weather" покрывал бы и
+            // "weather.temp", и "weather.summary" одной записью), хотя
+            // заводские мэппинги сейчас всегда указывают лист напрямую.
+            std::string prefix = std::string(m.slot.c_str()) + ".";
+            if (has_prefix(slot.c_str(), prefix.c_str())) return true;
+        }
+        return false;
+    }
+    if (c.kind == "anthropic") return has_prefix(slot.c_str(), "limit.claude");
+    if (c.kind == "codex") return has_prefix(slot.c_str(), "limit.codex");
+    if (c.kind == "imap") return has_prefix(slot.c_str(), "mail");
+    // geocode сам не пишет ни одного слота — он готовит координаты для
+    // "weather" (Settings.city_lat/lon). Виджету нужен weather.* -> нужен и
+    // geocode, иначе координаты не обновятся при смене города.
+    if (c.kind == "geocode") return has_prefix(slot.c_str(), "weather");
+    return false;
+}
+
+bool Schedule::should_poll(const String& id, uint32_t interval, uint32_t now) const {
+    const std::string key(id.c_str());
+    auto held = hold_until_.find(key);
+    if (held != hold_until_.end() && now < held->second) return false;
+    auto it = last_polled_.find(key);
+    if (it == last_polled_.end()) return true;
+    return now - it->second >= interval;
+}
+
+void Schedule::mark_polled(const String& id, uint32_t now) {
+    last_polled_[std::string(id.c_str())] = now;
+}
+
+void Schedule::hold(const String& id, uint32_t until) {
+    hold_until_[std::string(id.c_str())] = until;
+}
+
+uint32_t Schedule::held_until(const String& id) const {
+    auto it = hold_until_.find(std::string(id.c_str()));
+    return it == hold_until_.end() ? 0 : it->second;
+}
+
+void Schedule::forget_missing(const std::vector<config::Connector>& configured) {
+    auto sweep = [&configured](std::map<std::string, uint32_t>& m) {
+        for (auto it = m.begin(); it != m.end();) {
+            bool still_configured = false;
+            for (const auto& c : configured) {
+                if (std::string(c.id.c_str()) == it->first) { still_configured = true; break; }
+            }
+            it = still_configured ? std::next(it) : m.erase(it);
+        }
+    };
+    sweep(last_polled_);
+    sweep(hold_until_);
+}
+
 }  // namespace connectors
 
 #ifdef NATIVE_BUILD
@@ -862,15 +932,17 @@ uint16_t extract_ha_history_values(const String& json_body, float* out, uint16_t
 namespace connectors {
 
 // На хосте сети нет и не нужно: расписание и HTTP здесь не тестируются,
-// только разбор ответа (функции выше). Пустая реализация нужна лишь для
-// линковки — вызвать её из теста нельзя, она ничего не делает.
-void poll_due(const config::Settings&, slots::Store&, uint32_t) {}
+// только разбор ответа и provides() (функции выше). Пустая реализация нужна
+// лишь для линковки — вызвать её из теста нельзя, она ничего не делает;
+// widgets::Demand достаточно объявления (connectors.h) — тело её не трогает.
+void poll_due(const config::Settings&, slots::Store&, uint32_t, const widgets::Demand&) {}
 
 }  // namespace connectors
 
 #else  // !NATIVE_BUILD
 
-#include "netman.h"  // только на устройстве: persist_* → netman::reload()
+#include "netman.h"          // только на устройстве: persist_* → netman::reload()
+#include "widgets/demand.h"  // widgets::Demand — полное определение нужно poll_due ниже
 
 #include <HTTPClient.h>
 #include <WiFiClient.h>
@@ -889,9 +961,9 @@ namespace connectors {
 
 namespace {
 
-// коннектор → unix-время последнего опроса. Живёт в ОЗУ ровно как и слоты —
-// после перезагрузки опрос просто начинается заново.
-std::map<std::string, uint32_t> last_polled_;
+// Расписание опроса (см. Schedule в connectors.h). Живёт в ОЗУ ровно как и
+// слоты — после перезагрузки опрос просто начинается заново.
+Schedule schedule_;
 
 // http.getString() тянет всё тело в кучу разом — на ESP32 это 320 КБ RAM
 // суммарно, и один источник с раздутым ответом (или чужой сервер, отданный по
@@ -899,16 +971,6 @@ std::map<std::string, uint32_t> last_polled_;
 // Content-Length там, где сервер его прислал — а он присылает его в
 // подавляющем большинстве случаев для JSON-ответов таких размеров.
 constexpr int kMaxResponseBytes = 32 * 1024;
-
-bool should_poll(const config::Connector& c, uint32_t now) {
-    auto it = last_polled_.find(std::string(c.id.c_str()));
-    if (it == last_polled_.end()) return true;
-    return now - it->second >= c.interval;
-}
-
-void mark_polled(const config::Connector& c, uint32_t now) {
-    last_polled_[std::string(c.id.c_str())] = now;
-}
 
 // Один GET с таймаутом. https определяется по схеме в адресе: у Home
 // Assistant в локальной сети обычно http, у публичных API — https.
@@ -1008,9 +1070,11 @@ constexpr uint32_t kMailTtlSeconds = 1800;   // interval 900с — тот же �
 // decisions.md), а разбирать сам механизм бандла дороже, чем закрепить
 // корень явно там, где он уже подтверждённо ломается. nullptr (по умолчанию)
 // — прежнее поведение, общий бандл.
+// retry_after_out — секунды из заголовка Retry-After при 429 (0 — не
+// прислан); вызывающий код ставит паузу в Schedule ровно на них.
 int fetch_status(const String& url, const String& bearer_token, const char* extra_header,
                   const char* extra_header_value, String& body_out,
-                  const char* pinned_ca = nullptr) {
+                  const char* pinned_ca = nullptr, int* retry_after_out = nullptr) {
     WiFiClientSecure secure_client;
     HTTPClient http;
     if (pinned_ca != nullptr) {
@@ -1029,7 +1093,14 @@ int fetch_status(const String& url, const String& bearer_token, const char* extr
         http.addHeader(extra_header, extra_header_value);
     }
 
+    // Заголовки HTTPClient по умолчанию не сохраняет — просим Retry-After явно.
+    const char* wanted_headers[] = {"Retry-After"};
+    http.collectHeaders(wanted_headers, 1);
+
     int code = http.GET();
+    if (retry_after_out != nullptr) {
+        *retry_after_out = http.header("Retry-After").toInt();
+    }
     // Тело читаем РОВНО ОДИН РАЗ. Второй getString() на уже вычитанном теле
     // ждёт закрытия соединения, а при keep-alive от Cloudflare оно не
     // закрывается — главный цикл замирал на минуты сразу после лога «ответ
@@ -1442,30 +1513,24 @@ void fetch_and_store_ha_history(const config::Connector& c, const config::SlotMa
                   static_cast<unsigned>(raw_n), static_cast<unsigned>(n));
 }
 
-void poll_due(const config::Settings& settings, slots::Store& store, uint32_t now) {
+void poll_due(const config::Settings& settings, slots::Store& store, uint32_t now,
+              const widgets::Demand& demand) {
     const std::vector<config::Connector>& list = settings.connectors;
 
-    // Удалённый в форме коннектор не должен висеть в last_polled_ вечно —
-    // немного, но зачем копить мусор на объекте, который живёт всё время
-    // работы устройства.
-    for (auto it = last_polled_.begin(); it != last_polled_.end();) {
-        bool still_configured = false;
-        for (const auto& c : list) {
-            if (std::string(c.id.c_str()) == it->first) {
-                still_configured = true;
-                break;
-            }
-        }
-        if (still_configured) {
-            ++it;
-        } else {
-            it = last_polled_.erase(it);
-        }
-    }
+    schedule_.forget_missing(list);
 
     for (const config::Connector& c : list) {
-        if (!should_poll(c, now)) continue;
-        mark_polled(c, now);
+        // Коннектор без потребности не опрашивается вовсе — ни один виджет
+        // ни на одном из трёх дашбордов не читает ни одного его слота
+        // (widgets::compute_demand, main.cpp зовёт его перед poll_due).
+        if (!demand.needs(c.id)) continue;
+        // Эффективный интервал — виджет просит чаще, источник ограничивает
+        // (Claude не чаще 300 с из-за TLS, почта — 900): 0 у demand означает
+        // «ни один виджет не сужал», берём c.interval как раньше.
+        const uint32_t requested = demand.refresh_seconds(c.id);
+        const uint32_t effective_interval = requested > c.interval ? requested : c.interval;
+        if (!schedule_.should_poll(c.id, effective_interval, now)) continue;
+        schedule_.mark_polled(c.id, now);
 
         if (c.kind == "http") {
             String body;
@@ -1549,8 +1614,9 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             String refresh = claude_refresh_token(c);
 
             String body;
+            int retry_after = 0;
             int status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
-                                       "oauth-2025-04-20", body, kGtsRootR4Pem);
+                                       "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
 
             if (status == HTTP_CODE_UNAUTHORIZED) {
                 // Обновление — не чаще раза в час после неудачи: Anthropic отвечает
@@ -1574,7 +1640,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                     claude_refresh_override_[std::string(c.id.c_str())] = new_refresh;
                     persist_claude_tokens(c.id, new_access, new_refresh);
                     status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
-                                          "oauth-2025-04-20", body, kGtsRootR4Pem);
+                                          "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
                 } else {
                     refresh_backoff_until = now + 3600;
                     Serial.printf("коннектор «%s»: обновить токен не удалось, следующая попытка через час\n",
@@ -1632,7 +1698,15 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                                   static_cast<unsigned>(taken));
                 }
             } else if (status == HTTP_CODE_TOO_MANY_REQUESTS) {
-                Serial.printf("коннектор «%s»: сервер просит подождать (429)\n", c.id.c_str());
+                // Пауза по Retry-After (замер на живом: ≈340 с при опросе раз в
+                // 300 с — каждый опрос попадал в ещё открытое окно, и 429 не
+                // кончался часами, см. Schedule::hold в connectors.h). Минимум
+                // минута, плюс запас: часы устройства и сервера не совпадают
+                // секунда в секунду.
+                const uint32_t pause = static_cast<uint32_t>(retry_after > 60 ? retry_after : 60) + 30;
+                schedule_.hold(c.id, now + pause);
+                Serial.printf("коннектор «%s»: сервер просит подождать (429), пауза %u с\n",
+                              c.id.c_str(), static_cast<unsigned>(pause));
                 store.mark_failed(c.id, "сервер просит подождать (429)");
             } else if (status == 403) {
                 // docs/decisions.md, п.8а: 403 у Anthropic — не про токен, а
@@ -1645,7 +1719,9 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             } else {
                 Serial.printf("коннектор «%s»: источник не ответил (код %d)\n", c.id.c_str(),
                               status);
-                store.mark_failed(c.id);
+                char reason[48];
+                snprintf(reason, sizeof(reason), "источник не ответил (код %d)", status);
+                store.mark_failed(c.id, reason);
             }
         } else if (c.kind == "codex") {
             // Лимиты Codex — тот же Bearer, что и у http/homeassistant, но
@@ -1659,7 +1735,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 slots::Slot limit;
                 if (!parse_codex_usage(body, limit)) {
                     Serial.printf("коннектор «%s»: не удалось разобрать ответ\n", c.id.c_str());
-                    store.mark_failed(c.id);
+                    store.mark_failed(c.id, "ответ не разобран");
                 } else {
                     limit.number = remaining_percent(limit.number);
                     limit.text = format_number(limit.number);
@@ -1682,7 +1758,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             } else if (status == HTTP_CODE_UNAUTHORIZED) {
                 Serial.printf("коннектор «%s»: токен протух, обновление не настроено\n",
                               c.id.c_str());
-                store.mark_failed(c.id);
+                store.mark_failed(c.id, "токен протух — обновите на странице настройки");
             } else if (status == 403) {
                 // docs/decisions.md, п.8а — тот же диагноз, что у Claude выше.
                 Serial.printf("коннектор «%s»: недоступен из этой страны — нужен VPN\n",
@@ -1691,7 +1767,12 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             } else {
                 Serial.printf("коннектор «%s»: источник не ответил (код %d)\n", c.id.c_str(),
                               status);
-                store.mark_failed(c.id);
+                // Причина — на страницу тоже: без неё погасший блок выглядит
+                // как «данных нет», и владелец ищет ошибку в токене, а не в
+                // сети (так и вышло на живом 2026-09-21).
+                char reason[48];
+                snprintf(reason, sizeof(reason), "источник не ответил (код %d)", status);
+                store.mark_failed(c.id, reason);
             }
         } else if (c.kind == "imap") {
             // Список писем — три команды текстового протокола плюс FETCH

@@ -1,0 +1,426 @@
+# План: конструктор — виджеты как сущность, дашборды, кнопки, мастер источников
+
+## Goal
+
+Экран собирается из виджетов с единым протоколом (спецификация → видимость →
+отрисовка → регистрация), три дашборда переключаются кнопками платы, система
+опрашивает источники по потребностям виджетов, а страница настройки ведёт
+владельца через карточки источников без `id`/`kind`/путей JSON.
+
+## Context
+
+Репозиторий `~/Development/inkroam`, прошивка `firmware/src`, тесты на хосте
+`firmware/test/*` (`pio test -e native`), сборка `pio run -e xiao-esp32s3`
+(`pio` в `~/Library/Python/3.13/bin`). DoD — `scripts/verify.sh`.
+
+Ключевые файлы:
+- `firmware/src/layout.cpp/.h` — сейчас `draw_frame` жёстко перечисляет блоки
+  (`draw_rates`, `draw_limits_and_air`, `draw_mail`, `draw_today`) и константы
+  `RATES_WIDTH=296`, `TODAY_WIDTH=202`, `TOP_GAP`, `BOTTOM_GAP`, `ROW_GAP`,
+  `MARGIN`, `BODY_TOP`. Приватные помощники (`draw_eyebrow`, `draw_segbar`,
+  `draw_sparkline`, `draw_state_tag`, `truncate_to_width`, …) — в анонимном
+  namespace.
+- `firmware/src/config.h/.cpp` — `Settings`, `to_json/from_json`
+  (правило: поле отсутствует в JSON → «не трогали», берётся prev), `defaults()`,
+  `merge_missing_factory_connectors`. NVS-blob ≈ 5.4 КБ при потолке ≈ 8 КБ —
+  JSON дашбордов должен быть компактным (< 700 байт на три дашборда).
+- `firmware/src/connectors.cpp/.h` — `poll_due(settings, store, now)`,
+  интервал берётся из `Connector::interval`.
+- `firmware/src/main.cpp` — расписание панели (частичное ≥ 5 мин при смене
+  FNV-хэша, полное раз в час), `/api/status` снимок, NTP.
+- `firmware/src/netman.cpp/.h` — режимы `kConnecting/kStation/kAccessPoint`,
+  `start_access_point()` (приватная), ретрай раз в `kApRetryIntervalMs`,
+  пропуск ретрая при подключённом AP-клиенте.
+- `firmware/src/portal.cpp` — `/`, `/api/scan`, `/api/config` GET/POST,
+  `/api/status`, `/api/reboot`. Гейт «запись только из AP» уже убран.
+- `firmware/src/board.h` — `BUTTON_1=GPIO2`, `BUTTON_2=GPIO3`, `BUTTON_3=GPIO5`,
+  LOW при нажатии.
+- `firmware/data/index.html` — страница настройки, один файл без зависимостей.
+- `tools/render_frame/` — хостовый PNG-рендер (`build_and_run.sh`),
+  `tools/compare_frame.py <кадр> reference/cockpit-reference.png` — сверка
+  каркаса линий; на заводском «Столе» должно печатать «ВСЁ СОШЛОСЬ».
+- `firmware/test/test_layout/test_main.cpp` включает `layout.cpp` исходником;
+  `test_config` включает `config.cpp`; `test_slots` — `connectors.cpp` с
+  моками HTTP.
+
+Эталон дизайна: `reference/cockpit-reference.png`. Верхний ряд: Рынки
+(фикс. 296) + гибкая колонка Лимиты/Воздух, без вертикальной линии между
+ними. Нижний ряд: гибкая Почта + Сегодня (фикс. 202) с вертикальной линией
+2px слева от Сегодня. Между рядами — горизонтальная линия 2px.
+
+## Модель (контракт между прошивкой и страницей)
+
+### Размеры — стандартные, три токена
+
+| Токен | Ширина | Откуда |
+|---|---|---|
+| `S` | 202 px | «Сегодня» в эталоне |
+| `M` | 296 px | «Рынки» в эталоне |
+| `flex` | остаток ряда, делится поровну между flex-виджетами | гибкие колонки эталона |
+
+Правило ряда: видимые виджеты с `S`/`M` берут свои пиксели, `flex` делят
+остаток поровну. Если среди видимых нет ни одного `flex` — видимые делят ряд
+поровну (так эталон ведёт себя, когда правая колонка пропала: Рынки на всю
+ширину). Невидимый виджет места не резервирует. Зазор между виджетами —
+существующие `TOP_GAP`/`BOTTOM_GAP` (один общий `COL_GAP`, если они равны;
+если нет — сохранить по рядам, каркас эталона не должен разойтись).
+`divider:true` у виджета — вертикальная линия 2px в зазоре слева от него (как
+сейчас у Сегодня). Горизонтальная линия между рядами — если в обоих рядах
+есть видимые виджеты (как сейчас).
+
+### Протокол виджета (`firmware/src/widgets/`)
+
+```cpp
+// widgets/widget.h
+namespace widgets {
+
+enum class Size : uint8_t { kS, kM, kFlex };
+int16_t size_px(Size);              // kS→202, kM→296, kFlex→0
+
+struct Instance {                   // то, что лежит в дашборде
+    String type;                    // ключ в реестре
+    Size size = Size::kFlex;
+    bool divider = false;
+    String slot;                    // для metric: какой слот показывать
+    String label;                   // для metric/text: подпись
+};
+
+struct Spec {
+    const char* type;               // "markets"
+    const char* title;              // «Рынки» — для палитры на странице
+    Size default_size;
+    int16_t min_width;              // размеры уже этого страница не предлагает
+    const char* const* slots;       // слоты, которые виджет читает (nullptr-terminated);
+                                    // для metric — берётся из Instance::slot
+    uint32_t refresh_seconds;       // как часто виджету нужны свежие данные
+    bool (*visible)(const slots::Store&, const Instance&);
+    void (*draw)(canvas::Canvas&, const slots::Store&, const layout::DeviceInfo&,
+                 layout::Rect, const Instance&);
+};
+
+const Spec* find(const char* type);           // nullptr — неизвестный тип
+const Spec* const* all(size_t* count);        // реестр для /api/widgets и палитры
+
+// Слоты, которые нужны инстансу (для metric — его slot, иначе spec->slots).
+// Используется расчётом потребностей (demand) и страницей.
+void required_slots(const Instance&, std::vector<String>& out);
+
+}
+```
+
+Реестр — `widgets/registry.cpp`: статическая таблица `Spec`. Добавить виджет =
+один файл `widgets/w_<type>.cpp` со `Spec` + одна строка в таблице. Файл
+`docs/widgets.md` описывает протокол шагами (спека → visible → draw →
+регистрация → палитра подхватывает сама через `/api/widgets`).
+
+Общие примитивы рисования переезжают из анонимного namespace `layout.cpp` в
+`widgets/prims.h/.cpp` (namespace `layout::prims` или `widgets::prims`):
+`draw_eyebrow`, `draw_segbar`, `draw_sparkline`, `draw_state_tag`,
+`draw_inverse_label`, `draw_limit_row`, `draw_air_metric`, `truncate_to_width`,
+`format_delta`, `fill_hatched`, константы отступов. Пиксели не меняются.
+
+Базовый набор (перенос существующего кода отрисовки без изменения пикселей):
+
+| type | title | default | min | slots | refresh |
+|---|---|---|---|---|---|
+| `markets` | Рынки | M | 202 | btc, usd_rub, eur_rub | 300 |
+| `limits` | Лимиты AI | flex | 202 | limit.claude.5h, limit.claude.week, limit.claude.reset, limit.codex, limit.codex.reset | 300 |
+| `air` | Воздух | flex | 202 | co2, tvoc | 300 |
+| `limits_air` | Лимиты + Воздух | flex | 202 | объединение двух выше | 300 |
+| `mail` | Почта | flex | 202 | mail.unread, mail.1..4.* | 900 |
+| `today` | Сегодня | S | 202 | weather.temp, weather.summary, event.1..3.* | 1800 |
+| `metric` | Показатель | S | 120 | Instance::slot | 300 |
+| `text` | Подпись | S | 120 | — (visible всегда) | 0 |
+
+`limits`/`air` — это `draw_limits_and_air` с подавлением второй половины
+(флаги), `limits_air` — как сейчас. `metric`: эйброу = label (или slot),
+значение PlexMono28 через `format_value` с дельтой `format_delta` если
+`delta != 0`, спарклайн если `history_len ≥ 2`. `text`: label крупно
+Terminus20 bold, без данных.
+
+### Дашборды в настройках
+
+```jsonc
+"active_dashboard": 0,
+"dashboards": [
+  {"name":"Стол","rows":[
+    [{"type":"markets","size":"M"},{"type":"limits_air","size":"flex"}],
+    [{"type":"mail","size":"flex"},{"type":"today","size":"S","divider":true}]]},
+  {"name":"Дорога","rows":[
+    [{"type":"markets","size":"M"},{"type":"limits","size":"flex"}],
+    [{"type":"mail","size":"flex"},{"type":"today","size":"S","divider":true}]]},
+  {"name":"Свой","rows":[[],[]]}
+]
+```
+
+`config::Dashboard { String name; std::vector<widgets::Instance> rows[2]; }`,
+`Settings::dashboards` (ровно 3, `defaults()` даёт заводские выше),
+`Settings::active_dashboard` (0..2). `to_json` пишет всегда (и в NVS, и
+странице), поля `slot`/`label` — только если непустые, `divider` — только
+если true (экономия NVS). `from_json`: ключ `dashboards` отсутствует → prev;
+присутствует → заменить с валидацией: не больше 3 дашбордов (лишние
+отбрасываются, недостающие — пустые), не больше 2 рядов, не больше 6
+виджетов в ряду, неизвестный `type` (нет в реестре) — виджет отбрасывается,
+неизвестный `size` → default_size спеки. `active_dashboard` вне 0..2 → 0.
+`merge`-логики для дашбордов нет: владелец вправе опустошить любой.
+
+### Потребности виджетов управляют опросом
+
+`widgets::Demand widgets::compute_demand(const config::Settings&)` — по всем
+трём дашбордам (не только активному: переключение кнопкой должно показывать
+данные сразу) для каждого коннектора: нужен ли он (какой-то виджет читает
+слот, который коннектор даёт) и минимальный `refresh_seconds` среди таких
+виджетов. `connectors::provides(const Connector&, const String& slot)`:
+`http`/`homeassistant`/`weather` — по `map[].slot` (точное совпадение или
+префикс `slot + "."`); `anthropic` → `limit.claude`; `codex` → `limit.codex`;
+`imap` → `mail`; `geocode` → всё, что начинается с `weather` (зависимость
+погоды). `poll_due(settings, store, now, demand)`: коннектор без потребности
+не опрашивается вовсе; эффективный интервал = `max(demand.refresh,
+c.interval)` — виджет просит, источник ограничивает (Claude не чаще 300 с из-за
+TLS, почта — 900). `connectors::poll_due` старой сигнатуры удалить, чтобы не
+было второго пути. Расписание уже вынесено в хостово-тестируемый
+`connectors::Schedule` (`should_poll(id, interval, now)`, `mark_polled`,
+`hold` по Retry-After) — эффективный интервал передаётся туда; сам `poll_due`
+на хосте не собирается (стаб под `NATIVE_BUILD`), поэтому тестируются
+`compute_demand`, `provides` и `Schedule`, а не `poll_due` целиком.
+
+### Кнопки
+
+`firmware/src/buttons.h/.cpp`: `begin()` — `INPUT_PULLUP` на трёх пинах;
+`Event poll()` из главного цикла — антидребезг 30 мс, `kShort(index)` по
+отпусканию, `kLong(index)` при удержании ≥ 3 с (один раз). Короткое нажатие
+1/2/3 → `active_dashboard = i`, `config::save`, `netman::reload`, принудительная
+перерисовка (флаг `g_force_redraw`, минуя пятиминутный интервал; хэш
+содержимого учитывает `active_dashboard`). Долгое удержание кнопки 1 →
+`netman::force_access_point()`: поднять точку доступа даже при живой
+станционной сети и не пытаться вернуться в сеть 3 минуты (или пока подключён
+AP-клиент — существующая логика). Логика антидребезга и «долгое/короткое» —
+чистая функция от (уровень, millis) с хостовыми тестами (`test_buttons`).
+
+### mDNS
+
+При выходе в станционный режим — `MDNS.begin(device_name)` (ESPmDNS входит в
+Arduino-ESP32), чтобы страница открывалась как `http://<device_name>.local/`
+из домашней сети. Имя печатается в лог рядом с IP.
+
+### Страница настройки
+
+Секции: **Сеть** (как есть) · **Экраны** · **Источники** · **Устройство**.
+Баннер «только для чтения» и `can_write` — убрать целиком: запись разрешена
+из любой сети. Секреты страница по-прежнему не получает (`*_set`), пустое поле
+= «оставить», подпись у поля: «задан · оставьте пустым, чтобы не менять».
+При смене адреса источника показать подсказку: «адрес изменился — введите
+токен заново, иначе он не сохранится» (правило `target_unchanged` в
+config.cpp).
+
+**Экраны.** Три вкладки по дашбордам (имя редактируемое), переключатель
+«активный». В каждой — два ряда, список виджетов: название из `/api/widgets`,
+размер (селект S/M/гибкий, недоступные по `min_width` не предлагаются),
+«линия слева» (чекбокс), ▲/▼ внутри ряда, «→ в другой ряд», ✕. Кнопка
+«+ виджет» → палитра из `/api/widgets`; для `metric` — выбор слота из списка
+известных слотов + подпись; для `text` — текст. Рядом с типом — состояние
+источника: «источник настроен» / «нужен источник: Claude» (по слотам виджета →
+карточка источника; клик прокручивает к ней). Предпросмотр — `<canvas>`
+800×480, масштабируется по ширине: шапка полосой, виджеты прямоугольниками с
+названием по тому же правилу ряда (S/M/flex, зазоры, разделители); виджеты без
+настроенного источника — штриховкой. Никаких запросов к устройству за PNG.
+
+**Источники** — карточки, привязанные к заводским `id` коннекторов (они всегда
+есть: `merge_missing_factory_connectors` возвращает их при загрузке):
+
+| Карточка | id / kind | Поля | Подсказка |
+|---|---|---|---|
+| Claude | `claude` / anthropic | access token, refresh token | на Mac: `security find-generic-password -s "Claude Code-credentials" -w` → `claudeAiOauth.accessToken` / `.refreshToken`; общий refresh-токен с CLI ротируется — docs/decisions.md п.2 |
+| Codex | `codex` / codex | token | `~/.codex/auth.json` → `tokens.access_token` |
+| Почта | `mail` / imap | сервер IMAP (url), адрес ящика (username), пароль приложения (token) | Gmail: пароль приложения, не пароль аккаунта |
+| Умный дом | `home` / homeassistant | адрес, токен, «не проверять сертификат» (с предупреждением п.9), датчики: для каждого `map[]` — роль (co2→«CO₂», tvoc→«TVOC», иначе slot) + entity_id; «+ датчик» (слот из списка или свой) | долгоживущий токен из профиля HA |
+| Курсы | `btc`, `btc_history`, `fiat` | ничего — только состояние | публичные API без ключа |
+| Погода и часовой пояс | `weather`, `geocode` + `Settings.city` | город одной строкой (переезжает сюда из «Устройство») | координаты определятся при подключении |
+| Свой JSON | любые `http` не из заводского списка | id, адрес, период, токен, `map[]`: слот → путь | для тех, кому надо; сворачиваемая секция «дополнительно» |
+
+Состояние карточки — из `/api/status` (каждые 10 с): слот `<id>.status` с
+`error` → красная строка с текстом причины; иначе по первому слоту источника
+(`limit.claude.5h`, `limit.codex`, `mail.unread`, `co2`, `btc`, `weather.temp`):
+«обновлено N мин назад» / «данных ещё нет». `map[]` при сохранении отправлять
+целиком из загруженного состояния (объекты мутировать, не пересобирать —
+иначе потеряются `has_history`/`delta_source`).
+
+Payload `POST /api/config`: `device_name`, `city`, `timezone_minutes`,
+`networks[]`, `connectors[]` (все, с `map`), `dashboards[]`, `active_dashboard`.
+
+**Устройство**: имя устройства + подсказка «страница доступна как
+http://<имя>.local/ из той же сети».
+
+Новый эндпоинт `GET /api/widgets` (portal.cpp): массив спек из реестра —
+`{type,title,default_size,min_width,slots[],refresh}`.
+
+## Acceptance Criteria
+
+- [x] `widgets/` с протоколом, реестром, 8 базовыми виджетами; `layout::draw_frame(canvas, store, device, dashboard)` собирает кадр по данным
+- [x] Хостовый рендер `tools/render_frame` пишет `dashboard-0.png`, `dashboard-1.png`, `dashboard-2.png` для заводских дашбордов (сценарий «все источники отвечают») плюс прежние `full/degraded/empty/ap_credentials` (full = дашборд 0); `python3 tools/compare_frame.py tools/render_frame/out/dashboard-0.png reference/cockpit-reference.png` → «ВСЁ СОШЛОСЬ»
+- [x] `config`: `Dashboard`/`Instance` туда-обратно, заводские три, валидация; тест: `to_json(defaults(), true).length() < 7000`
+- [x] `compute_demand` + `poll_due(…, demand)`: тесты — коннектор без виджета не опрашивается; интервал = max(виджет, коннектор) (в самом poll_due, не тестируется на хосте — см. Status Log); geocode следует за погодой
+- [x] Кнопки: тесты антидребезга/длинного нажатия на хосте; на устройстве BTN1/2/3 переключают дашборд с немедленной перерисовкой; удержание BTN1 поднимает точку доступа (логика в netman/main.cpp, живым устройством не проверено — см. Status Log)
+- [ ] `/api/widgets` — сделано (portal.cpp); страница (секции Экраны/Источники, баннер read-only, предпросмотр на canvas) — `firmware/data/index.html`, вне моей зоны в этой задаче (параллельный исполнитель по тому же контракту)
+- [x] `scripts/verify.sh` зелёный; все существующие тесты проходят (визибилити-функции `rates_visible` и т.п. переехали в `widgets::Spec::visible` — тесты `test_layout` обновлены, покрытие не потеряно, плюс новые на реестр/раскладку/демand/кнопки)
+- [x] `docs/widgets.md` — протокол добавления виджета; `docs/constructor.md` приведён к реальной модели (токены размеров вместо 12 колонок, предпросмотр на странице вместо PNG с устройства)
+
+## Out of Scope
+
+- Перетаскивание мышью, произвольная высота, виджеты с кодом вне прошивки.
+- PNG-предпросмотр с устройства.
+- Изменение пикселей существующих блоков — эталон неприкосновенен.
+- Коммиты — только по запросу владельца.
+
+## Status Log
+
+- 2026-09-21 — Claude на живом устройстве: usage-эндпоинт отвечает 429 с
+  `Retry-After≈340 с` при опросе раз в 300 с — каждый запрос попадал в
+  открытое окно, refresh не срабатывал (он только на 401). Введён
+  `connectors::Schedule` с паузой по Retry-After (+6 тестов в test_slots,
+  мутация проверена). Пара токенов в keychain Mac совпадает с secrets.h и на
+  сервере уже отозвана — значит, устройство успело обновить пару само и
+  хранит живую в NVS.
+- 2026-09-21 — план написан. До него сделано: гейт «запись только из AP» убран
+  из portal.cpp; в config.cpp правило `target_unchanged` (секрет не
+  наследуется при смене url или включении insecure) + 5 тестов, мутация
+  проверена (2 падают без условия).
+- 2026-09-21 — реализована прошивочная часть (шаги 1-8 плана, кроме
+  `firmware/data/index.html` — параллельный исполнитель). Сделано:
+  - `firmware/src/widgets/` (types.h/.cpp, widget.h, registry.cpp, prims.h/.cpp,
+    demand.h/.cpp, w_markets/w_limits/w_air/w_limits_air/w_mail/w_today/w_metric/
+    w_text.cpp) — перенос отрисовки из layout.cpp без изменения пикселей,
+    подтверждено `compare_frame.py` → «ВСЁ СОШЛОСЬ» на dashboard-0.png.
+  - **Реальный баг найден и исправлен по пути**: `const Spec kXxxSpec = {...}`
+    на уровне namespace в C++ получает ВНУТРЕННЮЮ линковку по умолчанию —
+    `registry.cpp`'ный `extern const Spec kXxxSpec;` не находил символ при
+    раздельной компиляции (реальная сборка `env:xiao-esp32s3` и
+    `tools/render_frame`, которая линкует `.cpp` по отдельности через g++).
+    В едином TU тестов (`#include`-слияние) это маскировалось — там работает
+    даже с внутренней линковкой, потому что линковка неважна для разрешения
+    имён внутри одной единицы трансляции. Поймано ТОЛЬКО на `pio run
+    -e xiao-esp32s3` и на сборке `tools/render_frame` — исправлено явным
+    `extern` на определении в каждом `w_*.cpp` (см. `docs/widgets.md`, шаг 4).
+    Вывод для похожих задач: single-TU test harness не ловит ошибки линковки
+    — обязательно гонять хотя бы одну настоящую раздельную сборку.
+  - Также поймана и исправлена ODR-коллизия: одинаковые имена (`visible`,
+    `draw`, `kSlots`) в анонимных namespace разных `w_*.cpp` — безымянный
+    namespace один на единицу трансляции в C++, при слиянии тестов через
+    `#include` это redefinition. Имена даны с префиксом типа виджета
+    (`markets_visible`, `kMarketsSlots`, …) — см. комментарий в
+    `widgets/w_markets.cpp`.
+  - `config.h/.cpp`: `Dashboard`/`Instance` (последний — в `widgets/types.h`,
+    лёгкая таблица типов без Canvas, чтобы `test_config` не тянул отрисовку),
+    `Settings::dashboards`/`active_dashboard`, JSON компактный (slot/label
+    только непустые, divider только true), валидация (3 дашборда/2 ряда/6
+    виджетов, неизвестный type/size), заводские «Стол»/«Дорога»/«Свой». Тесты
+    +13 в test_config, мутация проверена на активном индексе (граница 3, не
+    5 — иначе мутация `>2`→`>3` проходила бы тестом незамеченной) и на лимите
+    в 3 дашборда.
+  - `layout.cpp/.h`: `layout_row` — общее правило ряда (S/M/flex), заменило
+    жёсткие `draw_rates`/`draw_limits_and_air`/`draw_mail`/`draw_today` в
+    `draw_frame`; `compute_columns*`/`compute_two_rows` оставлены как есть
+    (уже не вызываются из draw_frame, но тесты на них остаются зелёными —
+    не выбрасывал рабочий, протестированный код без необходимости).
+  - `connectors::provides` + `widgets::compute_demand`/`Demand` + новая
+    сигнатура `poll_due(settings, store, now, demand)`; старая (без demand)
+    убрана, второго пути нет. +19 тестов в test_slots (provides + demand),
+    мутация на `compute_demand` (min по виджетам) проверена. `max(demand,
+    interval)` живёт только внутри реального `poll_due` (device-only,
+    `#ifdef NATIVE_BUILD` — пустой стаб) — не тестируется на хосте, как и
+    предупреждает сам план.
+  - `buttons.h/.cpp`: чистая `update(state, level, now_ms)` (антидребезг 30 мс,
+    короткое по отпусканию, долгое ≥3 с один раз, без повторов и без
+    ложного «короткого» после «долгого») + `begin()/poll()` под `#ifndef
+    NATIVE_BUILD` (реальные GPIO). +8 тестов в новом `test_buttons` (свой
+    Arduino.h-шим не понадобился — код не использует String). `main.cpp`:
+    короткое 1/2/3 → `active_dashboard` + `config::save` + `netman::reload` +
+    `g_force_redraw` (перерисовка сразу, минуя 5-минутный интервал;
+    `content_hash` подмешивает `active_dashboard`); долгое на BTN1 →
+    `netman::force_access_point()` (новая функция: `start_access_point()`
+    даже из станции, `forced_hold_until` — 3 минуты без ретрая, поверх
+    существующей защиты «пока подключён AP-клиент»).
+  - mDNS: `MDNS.begin(device_name)` в `netman.cpp` на каждом входе в
+    станционный режим (не только при первом старте — DHCP каждой сети даёт
+    новый IP, запись нужно переобъявлять), лог рядом с IP.
+  - `GET /api/widgets` в portal.cpp — отдаёт весь реестр `{type,title,
+    default_size,min_width,slots[],refresh}`.
+  - `tools/render_frame`: подключает `config.cpp` исходником (та же причина,
+    что у тестов — `defaults()` в анонимном namespace, без внешней линковки),
+    пишет `dashboard-0/1/2.png` по заводским дашбордам плюс прежние
+    `full/degraded/empty/ap_credentials`; `build_and_run.sh` переведён на
+    Arduino.h-шим из `test_config` (нужен `isEmpty()`) и добавлен путь
+    ArduinoJson.
+  - `docs/widgets.md` (новый) — протокол виджета шагами, с примером; отдельно
+    зафиксирован урок про `extern`/анонимные namespace для тех, кто добавит
+    следующий виджет. `docs/constructor.md` переписан под реальную модель.
+  - Не проверено на живом устройстве (не было доступа в рамках задачи):
+    кнопки физически, mDNS-резолвинг из настоящей сети, `force_access_point`
+    при реально живой станции. Логика тестами на хосте и раздельной сборкой
+    покрыта, но это не замена живой проверке — если что-то не так с
+    таймингом реальных кнопок или с DNS-стеком телефона, узнается только там.
+  - `firmware/data/index.html` не трогал — по инструкции, параллельный
+    исполнитель работает по тому же контракту (JSON дашбордов/виджетов,
+    `/api/widgets`, `/api/config`). Секции «Экраны»/«Источники», баннер
+    read-only, canvas-предпросмотр — их зона.
+- 2026-09-21 — страница `firmware/data/index.html` переписана (второй
+  исполнитель): секции Сеть · Экраны · Источники · Устройство; баннер
+  read-only и `can_write` убраны; предпросмотр на `<canvas>` по правилу
+  S/M/flex; карточки источников по заводским `id` с синтезом отсутствующих;
+  `map[]` мутируется; статус карточек из `/api/status` раз в 10 с;
+  `node --check` встроенного скрипта чист. Оркестратор проверил: секреты в
+  payload — только введённые; `serializeInstance` — компактно (slot/label
+  непустые, divider только true).
+- 2026-09-21 — оркестратор: найден и исправлен дефект кнопок — после
+  `config::save` вызывался асинхронный `netman::reload()` (флаг, перечитывание
+  на следующем тике), а `g_force_redraw` рисовал кадр в том же тике по
+  СТАРОМУ `active_dashboard`; новый экран ждал бы пятиминутного интервала.
+  Добавлен `netman::reload_now()` (только из главного цикла) — кнопка
+  переключает кадр в том же тике. Запущено независимое ревью (opus).
+- 2026-09-21 — ревью (opus): BLOCK, 7 находок. Исправлено оркестратором:
+  (1) страница при неудачном `/api/config` больше не даёт редактируемую форму
+  — «Сохранить» заблокирована до удачной загрузки (иначе пустая форма стирала
+  сети и секреты); (2) у почты `username` — секрет, поле с «задан», предупреждение
+  про смену сервера называет и адрес ящика; (3) `/api/status` без `text`
+  слотов, `kind` включён в `target_unchanged` (+тест, мутация проверена),
+  `/api/reboot` только JSON (CSRF); (4) переполнение ряда → равный дележ
+  между видимыми (+2 теста, мутация проверена), предпросмотр повторяет то же
+  правило вместо клампа; (5) `MDNS.end()` перед `begin()`; (6) короткое
+  нажатие во время TLS-опроса теряется — ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ, не
+  исправлено (опросная кнопка из главного цикла; лечится прерыванием на
+  пине, отложено до живой проверки); (7) `config::save` у кнопки проверяется,
+  отказ логируется. Из «спорного»: `weather` владеет всем `weather.*` в
+  `provides`, экранирование id кастомного коннектора в атрибутах, тест кнопок,
+  который не мог упасть, удалён. Не проверено на устройстве: кнопки, mDNS,
+  принудительная AP, страница с живым `/api/widgets` — USB не подключён.
+- 2026-09-21 — залито на устройство (прошивка + LittleFS). Живая проверка по
+  сети: `/api/widgets` — 8 типов; `/api/config` — 3 дашборда, active=0,
+  секретов в ответе нет; `/api/status` без `text`; страница 200; reboot без
+  JSON — 404; mDNS `inkroam-setup.local` резолвится (curl без `-4` ждёт 5 с
+  IPv6-ответа, браузерам не мешает). Лог порта после перезагрузки: Claude —
+  429 сразу, пауза по Retry-After 2302 с (окно у Anthropic растёт с каждым
+  обращением: 340 → 2363 с; с Mac тем же токеном пробовать больше нельзя —
+  это продлевает окно). TVOC без графика: история HA за 6 ч — 1,2 МБ даже с
+  `minimal_response&no_attributes`, лимит 256 КБ; лечится только потоковым
+  разбором с децимацией на лету (долг «DeserializationOption::Filter»).
+  Кнопки физически и принудительная AP — не проверены (нужен человек у
+  устройства).
+- 2026-09-21 — по просьбе владельца: блок лимитов не прячет строку при
+  отказе источника, а показывает причину (`<id>.status` от `mark_failed`):
+  «Claude / GPT» + текст ошибки Terminus14 на месте шкалы, той же высоты
+  строки (`prims.cpp`: `limits_error_text`, `draw_limit_error_row`,
+  `has_failure_reason`; видимость `limits`/`limits_air` учитывает причину).
+  Ветка codex получила тексты причин во всех отказах (ответ не разобран /
+  токен протух / код N). +3 теста test_layout (мутация «причина никогда не
+  показывается» роняет 2), превью `degraded.png` со строкой GPT. Codex утром
+  гас транзиентно — вернулся сам, причина не поймана логом.
+- 2026-09-21 — повторное ревью (opus): BLOCK по одной находке — заглушка
+  `<id>.status` создавалась только у «холодного» коннектора, в частом случае
+  «данные были, прилетел 429» причины не было и блок исчезал молча.
+  Исправлено: `Store::mark_failed` пишет `<id>.status` всегда при непустой
+  причине (`put()` того же коннектора снимает); +2 теста test_slots, +1
+  test_layout (тёплый путь), мутация «только холодный» роняет оба. Общий
+  отказ Claude получил причину с кодом. Остальные шесть исправлений первого
+  круга ревью подтверждены. Мелочи не взяты: константы предпросмотра
+  (margin 12/gap 12 против 15 и 19/17 в прошивке) расходятся в полосе
+  20–40 px; `<id>.status` удалённого коннектора висит до перезагрузки.

@@ -217,6 +217,46 @@ Settings defaults() {
     mail.interval = 900;  // 15 минут — почта не требует опроса чаще
     s.connectors.push_back(mail);
 
+    // Заводские дашборды (docs/widgets.md) — «Стол» дословно воспроизводит
+    // эталон (reference/cockpit-reference.png): Рынки + Лимиты-и-Воздух
+    // сверху, Почта + Сегодня снизу, разделитель слева от Сегодня — как
+    // сейчас у draw_mail/draw_today в layout.cpp. «Дорога» — тот же каркас
+    // без датчиков дома (widgets::limits вместо widgets::limits_air): что
+    // показывать вне дома, где Home Assistant недоступен. «Свой» — пустой
+    // холст, чтобы было куда собирать своё.
+    auto widget = [](const char* type, widgets::Size size, bool divider = false) {
+        widgets::Instance i;
+        i.type = type;
+        i.size = size;
+        i.divider = divider;
+        return i;
+    };
+
+    {
+        Dashboard desk;
+        desk.name = "Стол";
+        desk.rows[0].push_back(widget("markets", widgets::Size::kM));
+        desk.rows[0].push_back(widget("limits_air", widgets::Size::kFlex));
+        desk.rows[1].push_back(widget("mail", widgets::Size::kFlex));
+        desk.rows[1].push_back(widget("today", widgets::Size::kS, /*divider=*/true));
+        s.dashboards.push_back(desk);
+    }
+    {
+        Dashboard road;
+        road.name = "Дорога";
+        road.rows[0].push_back(widget("markets", widgets::Size::kM));
+        road.rows[0].push_back(widget("limits", widgets::Size::kFlex));
+        road.rows[1].push_back(widget("mail", widgets::Size::kFlex));
+        road.rows[1].push_back(widget("today", widgets::Size::kS, /*divider=*/true));
+        s.dashboards.push_back(road);
+    }
+    {
+        Dashboard own;
+        own.name = "Свой";
+        s.dashboards.push_back(own);
+    }
+    s.active_dashboard = 0;
+
     return s;
 }
 
@@ -234,6 +274,35 @@ String find_token(const Settings& prev, const String& id) {
         if (conn.id == id) return conn.token;
     }
     return "";
+}
+
+const Connector* find_connector(const Settings& prev, const String& id) {
+    for (const auto& conn : prev.connectors) {
+        if (conn.id == id) return &conn;
+    }
+    return nullptr;
+}
+
+// Секрет не переезжает на новый адрес. Форма присылает пустое поле токена в
+// смысле «не трогали», и устройство подставляет сохранённый. Пока запись
+// настроек была разрешена только из точки доступа, этого хватало; теперь
+// форму можно сохранить из любой сети, в которой устройство оказалось
+// (docs/decisions.md, п.8), — и сосед по гостиничному Wi-Fi мог бы прислать
+// тот же коннектор со СВОИМ адресом и пустым токеном: устройство само
+// отнесло бы ему токен Home Assistant или пароль почты. Поэтому прежний
+// секрет наследуется только если цель осталась той же: адрес не менялся и
+// проверку сертификата не выключали (с выключенной проверкой тот же адрес
+// подменяется DNS-ом чужой сети). Сменил адрес — введи секрет заново; это
+// единственное, что владелец теперь делает руками, и делает редко.
+bool target_unchanged(const Connector* previous, const Connector& next) {
+    if (previous == nullptr) return true;  // наследовать всё равно нечего
+    if (previous->url != next.url) return false;
+    // kind задаёт протокол, которым секрет уходит на адрес (Bearer к HA,
+    // LOGIN к IMAP, OAuth к Anthropic): подменить kind при том же адресе —
+    // тот же увод секрета другим путём.
+    if (previous->kind != next.kind) return false;
+    if (!previous->insecure && next.insecure) return false;
+    return true;
 }
 
 // По той же схеме, что и token: секрет ищется у прежнего коннектора по id,
@@ -626,6 +695,29 @@ String to_json(const Settings& settings, bool include_secrets) {
         }
     }
 
+    // Дашборды — не секрет, отдаём всегда (и в NVS, и странице настройки),
+    // компактно: slot/label только если непустые, divider только если true
+    // (потолок NVS ≈ 8 КБ, см. save() — три дашборда не должны раздувать blob
+    // заметно). type/size пишем всегда — без них виджет не восстановить.
+    doc["active_dashboard"] = settings.active_dashboard;
+    JsonArray dashboards = doc["dashboards"].to<JsonArray>();
+    for (const auto& db : settings.dashboards) {
+        JsonObject dobj = dashboards.add<JsonObject>();
+        dobj["name"] = db.name.c_str();
+        JsonArray rows = dobj["rows"].to<JsonArray>();
+        for (const auto& row : db.rows) {
+            JsonArray row_arr = rows.add<JsonArray>();
+            for (const auto& item : row) {
+                JsonObject iobj = row_arr.add<JsonObject>();
+                iobj["type"] = item.type.c_str();
+                iobj["size"] = widgets::size_to_string(item.size);
+                if (item.divider) iobj["divider"] = true;
+                if (!item.slot.isEmpty()) iobj["slot"] = item.slot.c_str();
+                if (!item.label.isEmpty()) iobj["label"] = item.label.c_str();
+            }
+        }
+    }
+
     // serializeJson(doc, String&) идёт тем же путём через Arduino Print,
     // которого на хосте нет — сериализуем в буфер и оборачиваем в String
     // через c_str()-конструктор, он есть у обеих реализаций String.
@@ -725,27 +817,32 @@ bool from_json(const String& json, Settings& settings) {
             conn.interval = c["interval"] | 300;
             if (conn.interval < kMinPollIntervalSeconds) conn.interval = kMinPollIntervalSeconds;
 
-            String token = c["token"] | "";
-            if (token.isEmpty()) token = find_token(prev, conn.id);
-            conn.token = token;
-
-            // Тот же приём «пустое поле — не трогали»: страница настройки
-            // не отдаёт refresh_token/username обратно (to_json их прячет),
-            // а любая нормальная форма без явного значения не должна их стереть.
-            String refresh_token = c["refresh_token"] | "";
-            if (refresh_token.isEmpty()) refresh_token = find_refresh_token(prev, conn.id);
-            conn.refresh_token = refresh_token;
-
-            String username = c["username"] | "";
-            if (username.isEmpty()) username = find_username(prev, conn.id);
-            conn.username = username;
-
             // Явная галочка, не «оставить прежнее»: отсутствие поля — это
             // false, а не значение из prev. Так безопаснее в обе стороны —
             // и коннектор, добавленный без этого поля, не окажется случайно
             // расшарен как insecure, и обновление формы без явного намерения
             // не унаследует чужую галочку через find по id.
             conn.insecure = c["insecure"] | false;
+
+            // Пустое поле секрета — «не трогали», но только пока цель та же
+            // (см. target_unchanged выше). Читается до токенов: url и
+            // insecure уже разобраны, сравнивать есть с чем.
+            const bool inherit = target_unchanged(find_connector(prev, conn.id), conn);
+
+            String token = c["token"] | "";
+            if (token.isEmpty() && inherit) token = find_token(prev, conn.id);
+            conn.token = token;
+
+            // Тот же приём «пустое поле — не трогали»: страница настройки
+            // не отдаёт refresh_token/username обратно (to_json их прячет),
+            // а любая нормальная форма без явного значения не должна их стереть.
+            String refresh_token = c["refresh_token"] | "";
+            if (refresh_token.isEmpty() && inherit) refresh_token = find_refresh_token(prev, conn.id);
+            conn.refresh_token = refresh_token;
+
+            String username = c["username"] | "";
+            if (username.isEmpty() && inherit) username = find_username(prev, conn.id);
+            conn.username = username;
 
             // Страница настройки сейчас не умеет редактировать map и не
             // присылает это поле вовсе — отсутствие поля означает «не
@@ -774,6 +871,56 @@ bool from_json(const String& json, Settings& settings) {
     } else {
         settings.connectors = prev.connectors;
     }
+
+    // Дашборды — тем же приёмом «нет ключа — не трогали», что networks/
+    // connectors выше. Присутствие ключа заменяет ВСЕ три целиком —
+    // merge-логики нет намеренно (docs/widgets.md): владелец вправе
+    // опустошить любой дашборд, наследовать тут нечего, это не секрет.
+    if (doc["dashboards"].is<JsonArray>()) {
+        settings.dashboards.clear();
+        for (JsonObject dobj : doc["dashboards"].as<JsonArray>()) {
+            if (settings.dashboards.size() >= 3) break;  // лишние дашборды отбрасываются
+
+            Dashboard db;
+            db.name = dobj["name"] | "";
+
+            if (dobj["rows"].is<JsonArray>()) {
+                int r = 0;
+                for (JsonArray row : dobj["rows"].as<JsonArray>()) {
+                    if (r >= 2) break;  // не больше 2 рядов
+                    for (JsonObject iobj : row) {
+                        if (db.rows[r].size() >= 6) break;  // не больше 6 виджетов в ряду
+
+                        const char* type = iobj["type"] | "";
+                        const widgets::TypeInfo* info = widgets::find_type(type);
+                        if (info == nullptr) continue;  // неизвестный type — виджет отбрасывается
+
+                        widgets::Instance item;
+                        item.type = type;
+                        const char* size_str = iobj["size"] | "";
+                        if (!widgets::size_from_string(size_str, item.size)) {
+                            item.size = info->default_size;  // неизвестный size -> default_size спеки
+                        }
+                        item.divider = iobj["divider"] | false;
+                        item.slot = iobj["slot"] | "";
+                        item.label = iobj["label"] | "";
+                        db.rows[r].push_back(item);
+                    }
+                    ++r;
+                }
+            }
+
+            settings.dashboards.push_back(db);
+        }
+        // Недостающие дашборды — пустые, а не отсутствующие: активный индекс
+        // (ниже) всегда должен указывать на существующую запись.
+        while (settings.dashboards.size() < 3) settings.dashboards.push_back(Dashboard{});
+    } else {
+        settings.dashboards = prev.dashboards;
+    }
+
+    settings.active_dashboard = doc["active_dashboard"] | prev.active_dashboard;
+    if (settings.active_dashboard > 2) settings.active_dashboard = 0;
 
     return true;
 }

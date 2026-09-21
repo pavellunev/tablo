@@ -12,6 +12,11 @@
 #include <vector>
 
 #include "../../firmware/src/canvas_mem.h"
+// config.cpp, не config.h: defaults() (заводские дашборды) — внутренний
+// помощник в анонимном namespace config.cpp, с внешней линковкой недоступен
+// другой единице трансляции — тем же приёмом, что тесты (test_config)
+// подключают config.cpp исходником, а не линкуют отдельно.
+#include "../../firmware/src/config.cpp"
 #include "../../firmware/src/layout.h"
 #include "../../firmware/src/slots.h"
 
@@ -125,6 +130,9 @@ slots::Store build_degraded_scenario() {
     // Лимит недели устарел (данные были, но TTL давно прошёл) — должен
     // показаться с "≈", а не исчезнуть и не обнулиться.
     put_number(store, "limit.claude.week", 91, 0, 4000, 240, "limits");
+    // GPT данных нет, но коннектор объяснил почему — строка остаётся с текстом
+    // причины вместо шкалы (prims.cpp, limits_error_text).
+    store.mark_failed(String("codex"), String("сервер просит подождать (429)"));
 
     put_series(store, "co2", {900, 1050, 1180, 1260}, 20, 300, "air");
 
@@ -138,9 +146,10 @@ slots::Store build_degraded_scenario() {
 // рисует рамки "нет данных", просто шапка на пустом экране.
 slots::Store build_empty_scenario() { return slots::Store(); }
 
-bool render(const slots::Store& store, const layout::DeviceInfo& device, const std::string& path) {
+bool render(const slots::Store& store, const layout::DeviceInfo& device, const std::string& path,
+            const config::Dashboard& dashboard) {
     canvas::CanvasMemory canvas(800, 480);
-    layout::draw_frame(canvas, store, device);
+    layout::draw_frame(canvas, store, device, dashboard);
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
     return ok;
@@ -173,11 +182,23 @@ int main(int argc, char** argv) {
     device.next_update_at = kNow + 1800;
     device.timezone_minutes = 180;  // MSK
 
+    // Заводские дашборды (config::defaults()) — «Стол»/«Дорога»/«Свой»,
+    // docs/widgets.md. full.png дословно равен dashboard-0.png (тот же
+    // сценарий, тот же дашборд «Стол») — имя сохранено ради обратной
+    // совместимости с тем, что уже проверяет tools/compare_frame.py.
+    const config::Settings defaults = config::defaults();
+
     bool ok = true;
-    ok &= render(build_full_scenario(), device, out_dir + "/full.png");
-    ok &= render(build_degraded_scenario(), device, out_dir + "/degraded.png");
-    ok &= render(build_empty_scenario(), device, out_dir + "/empty.png");
+    ok &= render(build_full_scenario(), device, out_dir + "/full.png", defaults.dashboards[0]);
+    ok &= render(build_degraded_scenario(), device, out_dir + "/degraded.png", defaults.dashboards[0]);
+    ok &= render(build_empty_scenario(), device, out_dir + "/empty.png", defaults.dashboards[0]);
     ok &= render_ap_credentials(out_dir + "/ap_credentials.png");
+
+    // Три заводских дашборда, сценарий «все источники отвечают» — тот же
+    // build_full_scenario(), меняется только то, какие виджеты в дашборде.
+    ok &= render(build_full_scenario(), device, out_dir + "/dashboard-0.png", defaults.dashboards[0]);
+    ok &= render(build_full_scenario(), device, out_dir + "/dashboard-1.png", defaults.dashboards[1]);
+    ok &= render(build_full_scenario(), device, out_dir + "/dashboard-2.png", defaults.dashboards[2]);
 
     return ok ? 0 : 1;
 }

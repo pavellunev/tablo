@@ -14,6 +14,8 @@
 
 #include <vector>
 
+#include "widgets/types.h"
+
 namespace config {
 
 struct Network {
@@ -82,6 +84,15 @@ struct Connector {
     bool insecure = false;
 };
 
+// Экран, который можно собрать на странице настройки (docs/widgets.md):
+// два ряда виджетов, каждый — widgets::Instance (тип, размер S/M/flex,
+// опциональный разделитель слева, слот/подпись для metric/text). Переключают
+// кнопками платы (buttons.h) — активный запоминается в Settings ниже.
+struct Dashboard {
+    String name;
+    std::vector<widgets::Instance> rows[2];
+};
+
 struct Settings {
     std::vector<Network> networks;
     std::vector<Connector> connectors;
@@ -111,6 +122,14 @@ struct Settings {
     String city_resolved;
     float city_lat = 0.0f;
     float city_lon = 0.0f;
+
+    // Три дашборда (docs/widgets.md) — ровно три всегда, defaults() и
+    // from_json это гарантируют (лишние отбрасываются, недостающие —
+    // пустые), кнопки платы (buttons.h) переключают по индексу, четвёртой
+    // кнопки на плате нет. active_dashboard — 0..2, вне диапазона при
+    // разборе JSON откатывается к 0 (config.cpp).
+    std::vector<Dashboard> dashboards;
+    uint8_t active_dashboard = 0;
 };
 
 // Читает настройки из NVS. Ничего не сохранено — возвращает значения по

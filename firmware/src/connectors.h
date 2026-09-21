@@ -10,10 +10,21 @@
 
 #include <Arduino.h>
 
+#include <map>
+#include <string>
 #include <vector>
 
 #include "config.h"
 #include "slots.h"
+
+// Только объявление — poll_due() ниже берёт потребности виджетов по ссылке,
+// самого определения (widgets::Demand, widgets/demand.h) заголовку знать не
+// нужно. widgets/demand.cpp сам включает этот файл ради connectors::provides
+// — полный #include "widgets/demand.h" здесь замкнул бы цикл на этапе
+// препроцессора.
+namespace widgets {
+class Demand;
+}
 
 namespace connectors {
 
@@ -95,14 +106,56 @@ uint8_t decimate(const float* in, uint16_t in_count, float* out, uint8_t out_cou
 // датчик за 6 часов легко даёт больше 255 записей (см. decimate выше).
 uint16_t extract_ha_history_values(const String& json_body, float* out, uint16_t max_len);
 
-// Опрашивает коннекторы, у которых истёк interval с прошлого опроса. Ошибка
-// одного коннектора не должна ронять остальные: поймали — пометили его слоты
-// через Store::mark_failed и пошли дальше. now — unix-время, передаётся
-// снаружи, чтобы расписание опроса не зависело от системных часов напрямую.
-// Полные Settings, а не только connectors: kind="weather"/"geocode" читают
-// город и координаты устройства (settings.city*) — это настройка уровня
-// устройства, а не отдельного коннектора (docs/constructor.md).
-void poll_due(const config::Settings& settings, slots::Store& store, uint32_t now);
+// Расписание опроса — чистая логика без сети, тестируется на хосте
+// (test_slots). poll_due держит один экземпляр на всё время работы.
+//
+// hold() — источник попросил подождать. Anthropic на /api/oauth/usage
+// отвечает 429 с Retry-After ≈ 340 с, а опрос шёл раз в 300 с: каждый
+// следующий запрос попадал внутрь ещё не истёкшего окна и продлевал его —
+// лимиты Claude стояли на «сервер просит подождать» часами, хотя токен был
+// исправен (обновление токена срабатывает только на 401, а до 401 дело не
+// доходило). Пауза по Retry-After ломает этот цикл.
+class Schedule {
+   public:
+    // true — интервал с прошлого опроса истёк (или опроса ещё не было) и нет
+    // действующей паузы hold().
+    bool should_poll(const String& id, uint32_t interval, uint32_t now) const;
+    void mark_polled(const String& id, uint32_t now);
+    // До until (unix-время) коннектор не опрашивается, даже если interval истёк.
+    void hold(const String& id, uint32_t until);
+    uint32_t held_until(const String& id) const;  // 0 — паузы нет
+    // Удалённые в форме коннекторы не должны копиться в памяти вечно.
+    void forget_missing(const std::vector<config::Connector>& configured);
+
+   private:
+    std::map<std::string, uint32_t> last_polled_;
+    std::map<std::string, uint32_t> hold_until_;
+};
+
+// Даёт ли коннектор слот (widgets::compute_demand спрашивает это по каждому
+// нужному виджетам слоту, widgets/demand.cpp): http/homeassistant/weather —
+// по map[].slot (точное совпадение или префикс "map[].slot."), остальные —
+// по kind, без карты (у них её либо нет вовсе, либо она не про то, что
+// виджет ищет в Store): anthropic -> limit.claude*, codex -> limit.codex*,
+// imap -> mail*, geocode -> weather* (погода зависит от координат, которые
+// даёт геокодинг — сам он в Store ничего не пишет).
+bool provides(const config::Connector& c, const String& slot);
+
+// Опрашивает коннекторы, которые нужны хотя бы одному видимому-или-нет
+// виджету во ВСЕХ трёх дашбордах (widgets::Demand, а не только активному —
+// переключение кнопкой должно показать данные сразу, не ждать первого опроса
+// после смены экрана). Коннектор без потребности не опрашивается вовсе.
+// Эффективный интервал — max(demand.refresh_seconds(c.id), c.interval):
+// виджет просит чаще, источник ограничивает (Claude не чаще 300 с из-за TLS,
+// почта — 900). Ошибка одного коннектора не должна ронять остальные: поймали
+// — пометили его слоты через Store::mark_failed и пошли дальше. now —
+// unix-время, передаётся снаружи, чтобы расписание опроса не зависело от
+// системных часов напрямую. Полные Settings, а не только connectors:
+// kind="weather"/"geocode" читают город и координаты устройства
+// (settings.city*) — это настройка уровня устройства, а не отдельного
+// коннектора (docs/widgets.md).
+void poll_due(const config::Settings& settings, slots::Store& store, uint32_t now,
+              const widgets::Demand& demand);
 
 // ── разбор ответов лимитов/почты — чистые функции, тестируются на хосте ──
 
