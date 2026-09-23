@@ -201,6 +201,7 @@ Settings defaults() {
     codex.id = "codex";
     codex.kind = "codex";
     codex.token = CODEX_ACCESS_TOKEN_DEFAULT;
+    codex.refresh_token = CODEX_REFRESH_TOKEN_DEFAULT;  // обновление пары — как у Claude (connectors.cpp, try_refresh)
     codex.interval = 300;
     s.connectors.push_back(codex);
 

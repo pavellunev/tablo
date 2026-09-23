@@ -845,8 +845,11 @@ function renderClaudeCard() {
 function renderCodexCard() {
   var c = conn('codex');
   return '<div class="source-card" id="source-card-codex"><h3>Codex</h3>' + statusLineHtml('codex') +
-    '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
-    '<p class="hint">Источник: <code>~/.codex/auth.json</code> → поле <code>tokens.access_token</code>.</p>' +
+    '<label>Access token<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
+    '<label>Refresh token<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="codex"></label>' +
+    '<p class="hint">Источник: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> и <code>tokens.refresh_token</code>. ' +
+    'С refresh-токеном устройство обновляет пару само. Лучше отдельный вход для устройства, чтобы не делить пару с Codex CLI: ' +
+    '<code>CODEX_HOME=~/.codex-tablo codex login</code>, затем токены из <code>~/.codex-tablo/auth.json</code>.</p>' +
     '</div>';
 }
 

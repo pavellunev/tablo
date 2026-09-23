@@ -1048,6 +1048,16 @@ constexpr const char* kAnthropicTokenUrl = "https://console.anthropic.com/v1/oau
 // Публичный идентификатор клиента Claude Code — тот же, что при обычном
 // входе через `claude login`, не секрет сам по себе.
 constexpr const char* kAnthropicClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+
+// Обновление токена Codex — тот же OAuth refresh, что у Claude, только у
+// OpenAI: эндпоинт и публичный client_id взяты из бинаря Codex CLI
+// (`strings … | grep oauth/token`, `app_EMoamEEZ73f0CkXaXp7hrann` — это же
+// значение стоит в поле client_id самого access-токена), scope — как в
+// исходниках codex-rs (core/src/auth.rs, RefreshRequest). Без обновления
+// токен Codex жил около десяти дней, потом блок гас до ручной подстановки.
+constexpr const char* kCodexTokenUrl = "https://auth.openai.com/oauth/token";
+constexpr const char* kCodexClientId = "app_EMoamEEZ73f0CkXaXp7hrann";
+constexpr const char* kCodexRefreshScope = "openid profile email";
 constexpr const char* kCodexUsageUrl = "https://chatgpt.com/backend-api/wham/usage";
 
 // Свежесть лимитов и почты — константа, не поле map: у этих коннекторов нет
@@ -1126,21 +1136,32 @@ int fetch_status(const String& url, const String& bearer_token, const char* extr
 // Один POST на обновление токена Claude — ровно один раз, без ретраев и без
 // цикла: если он не удался, вызывающий код (poll_due) просто гасит слоты до
 // следующего планового опроса, а не пытается снова прямо сейчас.
-bool refresh_claude_token(const String& refresh_token, String& new_access, String& new_refresh) {
+// Один OAuth-refresh для любого из двух источников: url/client_id/scope
+// различаются, тело и разбор ответа (parse_oauth_refresh) — общие. scope
+// nullptr — поле не отправляется (Anthropic его не ждёт). pinned_ca nullptr —
+// общий бандл; иначе закреплённый корень (см. pinned_roots.h, п.9).
+bool refresh_oauth_token(const char* token_url, const char* client_id, const char* scope,
+                         const char* pinned_ca, const String& refresh_token, String& new_access,
+                         String& new_refresh) {
     if (refresh_token.length() == 0) return false;
 
     JsonDocument req;
     req["grant_type"] = "refresh_token";
     req["refresh_token"] = refresh_token.c_str();
-    req["client_id"] = kAnthropicClientId;
+    req["client_id"] = client_id;
+    if (scope != nullptr) req["scope"] = scope;
     size_t needed = measureJson(req) + 1;
     std::vector<char> buf(needed);
     serializeJson(req, buf.data(), needed);
 
     WiFiClientSecure secure_client;
     HTTPClient http;
-    secure_client.setCACertBundle(x509_crt_bundle_start);
-    http.begin(secure_client, kAnthropicTokenUrl);
+    if (pinned_ca != nullptr) {
+        secure_client.setCACert(pinned_ca);
+    } else {
+        secure_client.setCACertBundle(x509_crt_bundle_start);
+    }
+    http.begin(secure_client, token_url);
     http.setConnectTimeout(REQUEST_TIMEOUT_MS);
     http.setTimeout(REQUEST_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
@@ -1172,8 +1193,7 @@ bool refresh_claude_token(const String& refresh_token, String& new_access, Strin
 // (тоже редкое событие) — не защищена мьютексом на саму запись в NVS, тот
 // же уровень риска, что и у остальных редких обращений к Preferences в
 // этом проекте.
-void persist_claude_tokens(const String& connector_id, const String& access,
-                            const String& refresh) {
+void persist_tokens(const String& connector_id, const String& access, const String& refresh) {
     config::Settings settings = config::load();
     for (auto& conn : settings.connectors) {
         if (conn.id == connector_id) {
@@ -1189,24 +1209,67 @@ void persist_claude_tokens(const String& connector_id, const String& access,
     }
 }
 
-// Обновлённые в рантайме токены Claude — коннектор, переданный в poll_due,
-// это копия из netman::settings() и меняется только при следующей
+// Обновлённые в рантайме токены Claude/Codex — коннектор, переданный в
+// poll_due, это копия из netman::settings() и меняется только при следующей
 // перезагрузке/сохранении формы (см. комментарий у netman::reload()).
 // Без этого кеша каждый опрос после первого refresh снова получал бы 401 по
 // уже устаревшему в памяти токену и снова обновлял бы его — лишний раунд
-// сети на каждые 5 минут вместо одного раза в ~8 часов. persist_claude_tokens
+// сети на каждые 5 минут вместо одного раза в ~8 часов. persist_tokens
 // выше отвечает за то, чтобы это же значение пережило перезагрузку.
-std::map<std::string, String> claude_access_override_;
-std::map<std::string, String> claude_refresh_override_;
+std::map<std::string, String> access_override_;
+std::map<std::string, String> refresh_override_;
 
-String claude_access_token(const config::Connector& c) {
-    auto it = claude_access_override_.find(std::string(c.id.c_str()));
-    return it != claude_access_override_.end() ? it->second : c.token;
+String access_token_for(const config::Connector& c) {
+    auto it = access_override_.find(std::string(c.id.c_str()));
+    return it != access_override_.end() ? it->second : c.token;
 }
 
-String claude_refresh_token(const config::Connector& c) {
-    auto it = claude_refresh_override_.find(std::string(c.id.c_str()));
-    return it != claude_refresh_override_.end() ? it->second : c.refresh_token;
+String refresh_token_for(const config::Connector& c) {
+    auto it = refresh_override_.find(std::string(c.id.c_str()));
+    return it != refresh_override_.end() ? it->second : c.refresh_token;
+}
+
+// Обновление — не чаще раза в час после неудачи, на каждый коннектор своё:
+// Anthropic на частые refresh отвечает 429, и каждая попытка продлевает запрет
+// (упёрлись на живом после серии перепрошивок); у OpenAI мёртвый refresh
+// тоже незачем дёргать каждые пять минут.
+std::map<std::string, uint32_t> refresh_backoff_until_;
+
+// Общий сценарий «получили 401»: попытка обновить пару с учётом бэкоффа.
+// true — access обновлён, запрос можно повторить; false — повторять нечего,
+// слоты уже погашены с причиной, вызывающий код делает continue.
+bool try_refresh(const config::Connector& c, uint32_t now, const char* token_url,
+                 const char* client_id, const char* scope, const char* pinned_ca, String& access,
+                 slots::Store& store) {
+    const std::string key(c.id.c_str());
+    auto held = refresh_backoff_until_.find(key);
+    if (held != refresh_backoff_until_.end() && now < held->second) {
+        Serial.printf("коннектор «%s»: токен протух, обновление отложено ещё на %u мин\n",
+                      c.id.c_str(), static_cast<unsigned>((held->second - now + 59) / 60));
+        store.mark_failed(c.id, "токен протух, обновление отложено");
+        return false;
+    }
+    const String refresh = refresh_token_for(c);
+    if (refresh.length() == 0) {
+        Serial.printf("коннектор «%s»: токен протух, refresh-токен не задан\n", c.id.c_str());
+        store.mark_failed(c.id, "токен протух — задайте refresh-токен на странице настройки");
+        return false;
+    }
+    Serial.printf("коннектор «%s»: токен протух, обновляю через refresh_token\n", c.id.c_str());
+    String new_access, new_refresh;
+    if (!refresh_oauth_token(token_url, client_id, scope, pinned_ca, refresh, new_access, new_refresh)) {
+        refresh_backoff_until_[key] = now + 3600;
+        Serial.printf("коннектор «%s»: обновить токен не удалось, следующая попытка через час\n",
+                      c.id.c_str());
+        store.mark_failed(c.id, "токен протух — обновить не удалось, повтор через час");
+        return false;
+    }
+    refresh_backoff_until_.erase(key);
+    access = new_access;
+    access_override_[key] = new_access;
+    refresh_override_[key] = new_refresh;
+    persist_tokens(c.id, new_access, new_refresh);
+    return true;
 }
 
 // Читает одну строку ответа IMAP (до \n) с таймаутом — тот же приём, что и у
@@ -1398,7 +1461,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
 }
 
 // Кладёт геокодированные координаты в NVS — тем же приёмом, что
-// persist_claude_tokens: config::save() пишет полный Settings, «один
+// persist_tokens: config::save() пишет полный Settings, «один
 // владелец на запись» (config.h). city_resolved = city — отметка «для этого
 // названия координаты уже есть», иначе геокодинг повторялся бы на каждый
 // опрос до следующей перезагрузки.
@@ -1428,7 +1491,7 @@ void persist_timezone(int16_t minutes) {
 // Геокодинг этой сессии — отдельно от settings.city_resolved (которое живёт
 // в NVS и обновляется только после успешного persist_city): без своего кеша
 // каждый следующий опрос видел бы через netman::settings() всё тот же
-// «устаревший» Settings (см. комментарий у claude_access_override_ выше —
+// «устаревший» Settings (см. комментарий у access_override_ выше —
 // тот же класс проблемы) и заново дёргал бы геокодинг каждый interval, пока
 // устройство не перезагрузят. Пустая строка — этой сессией город ещё не
 // резолвился, сверяемся с тем, что принесли из NVS через settings.city_resolved.
@@ -1610,8 +1673,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // ровно один раз и повторяем сам запрос usage тоже один раз —
             // без циклов (см. connectors.h, requirement задачи буквально;
             // Anthropic агрессивно ограничивает частый опрос 429-м).
-            String access = claude_access_token(c);
-            String refresh = claude_refresh_token(c);
+            String access = access_token_for(c);
 
             String body;
             int retry_after = 0;
@@ -1619,33 +1681,14 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                                        "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
 
             if (status == HTTP_CODE_UNAUTHORIZED) {
-                // Обновление — не чаще раза в час после неудачи: Anthropic отвечает
-                // на частые refresh 429, и каждая попытка продлевает запрет. После
-                // серии перепрошивок устройство упёрлось в это на живом.
-                static uint32_t refresh_backoff_until = 0;
-                if (now < refresh_backoff_until) {
-                    Serial.printf("коннектор «%s»: токен протух, обновление отложено ещё на %u мин\n",
-                                  c.id.c_str(),
-                                  static_cast<unsigned>((refresh_backoff_until - now + 59) / 60));
-                    store.mark_failed(c.id, "токен протух, обновление отложено");
+                // access_token живёт около восьми часов — обновляем пару ровно
+                // один раз и повторяем сам запрос тоже один раз, без циклов.
+                if (!try_refresh(c, now, kAnthropicTokenUrl, kAnthropicClientId, nullptr, nullptr,
+                                 access, store)) {
                     continue;
                 }
-                Serial.printf("коннектор «%s»: токен протух, обновляю через refresh_token\n",
-                              c.id.c_str());
-                String new_access, new_refresh;
-                if (refresh_claude_token(refresh, new_access, new_refresh)) {
-                    refresh_backoff_until = 0;
-                    access = new_access;
-                    claude_access_override_[std::string(c.id.c_str())] = new_access;
-                    claude_refresh_override_[std::string(c.id.c_str())] = new_refresh;
-                    persist_claude_tokens(c.id, new_access, new_refresh);
-                    status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
-                                          "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
-                } else {
-                    refresh_backoff_until = now + 3600;
-                    Serial.printf("коннектор «%s»: обновить токен не удалось, следующая попытка через час\n",
-                                  c.id.c_str());
-                }
+                status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
+                                      "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
             }
 
             if (status == HTTP_CODE_OK) {
@@ -1724,12 +1767,21 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 store.mark_failed(c.id, reason);
             }
         } else if (c.kind == "codex") {
-            // Лимиты Codex — тот же Bearer, что и у http/homeassistant, но
-            // без обновления: задача описывает refresh только для Claude.
-            // Протухший токен просто гасит слот до ручной подстановки в
-            // secrets.h — не идеально автономно, но так и запрошено.
+            // Лимиты Codex — Bearer-токен ChatGPT; протухший обновляется через
+            // refresh-токен (try_refresh ниже), как у Claude.
+            String access = access_token_for(c);
             String body;
-            int status = fetch_status(kCodexUsageUrl, c.token, nullptr, nullptr, body, kGtsRootR4Pem);
+            int status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kGtsRootR4Pem);
+
+            if (status == HTTP_CODE_UNAUTHORIZED) {
+                // Токен Codex живёт около десяти дней; refresh-токен из auth.json
+                // Codex CLI позволяет обновлять пару так же, как у Claude.
+                if (!try_refresh(c, now, kCodexTokenUrl, kCodexClientId, kCodexRefreshScope,
+                                 kIsrgRootsPem, access, store)) {
+                    continue;
+                }
+                status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kGtsRootR4Pem);
+            }
 
             if (status == HTTP_CODE_OK) {
                 slots::Slot limit;
@@ -1756,9 +1808,10 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                     Serial.printf("коннектор «%s»: получено значений 1\n", c.id.c_str());
                 }
             } else if (status == HTTP_CODE_UNAUTHORIZED) {
-                Serial.printf("коннектор «%s»: токен протух, обновление не настроено\n",
-                              c.id.c_str());
-                store.mark_failed(c.id, "токен протух — обновите на странице настройки");
+                // Сюда попадаем только после удачного refresh: новый токен и
+                // тот отвергнут — дело не в сроке жизни.
+                Serial.printf("коннектор «%s»: новый токен тоже отвергнут (401)\n", c.id.c_str());
+                store.mark_failed(c.id, "токен отвергнут — войдите в Codex заново");
             } else if (status == 403) {
                 // docs/decisions.md, п.8а — тот же диагноз, что у Claude выше.
                 Serial.printf("коннектор «%s»: недоступен из этой страны — нужен VPN\n",
@@ -1900,7 +1953,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // сессией (resolved_city_cache_), либо раньше и сохранён в NVS
             // (settings.city_resolved). Без своего кеша сессии этот коннектор
             // повторял бы запрос на каждый interval до перезагрузки — та же
-            // проблема, что решает claude_access_override_ выше.
+            // проблема, что решает access_override_ выше.
             if (settings.city.length() == 0) continue;
             const String& already_resolved =
                 resolved_city_cache_.length() > 0 ? resolved_city_cache_ : settings.city_resolved;

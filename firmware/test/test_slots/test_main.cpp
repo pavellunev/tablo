@@ -1286,6 +1286,19 @@ static void test_put_after_warm_failure_clears_reason_slot() {
     TEST_ASSERT_NULL(store.find(String("claude.status")));
 }
 
+static void test_parse_oauth_refresh_codex_response_with_id_token() {
+    // Ответ auth.openai.com несёт лишнее поле id_token — разбор его игнорирует,
+    // пара access/refresh берётся как есть (тот же парсер, что у Claude).
+    String access, refresh;
+    bool ok = connectors::parse_oauth_refresh(
+        String("{\"id_token\":\"eyJhbGciOi.id.tok\",\"access_token\":\"eyJhbGciOi.acc.ess\","
+               "\"refresh_token\":\"rt-new\"}"),
+        String("rt-old"), access, refresh);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL_STRING("eyJhbGciOi.acc.ess", access.c_str());
+    TEST_ASSERT_EQUAL_STRING("rt-new", refresh.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
 
@@ -1427,6 +1440,7 @@ int main() {
     RUN_TEST(test_schedule_forget_missing_keeps_configured);
     RUN_TEST(test_mark_failed_with_data_still_records_reason_slot);
     RUN_TEST(test_put_after_warm_failure_clears_reason_slot);
+    RUN_TEST(test_parse_oauth_refresh_codex_response_with_id_token);
     RUN_TEST(test_status_placeholder_removed_when_connector_recovers);
 
     RUN_TEST(test_provides_http_matches_exact_map_slot);
