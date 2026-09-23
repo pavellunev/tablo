@@ -1358,10 +1358,14 @@ bool imap_fetch_headers(WiFiClientSecure& client, int message_id, const char* ta
 // GTS Root R1, тому же семейству, что систематически не проходит проверку
 // через общий бандл. recent_out — самые новые письма ПЕРВЫМИ (для mail.1.*),
 // в отличие от порядка SEARCH (там самые новые — последние в списке).
+// reason_out — причина отказа человеческим языком: уходит в
+// Store::mark_failed и дальше на панель и на карточку источника. Без неё
+// погасшая почта выглядела как «блок пропал», а не «LOGIN отвергнут»
+// (2026-09-23, после двух дней работы — владелец увидел пустое место).
 bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
                         const String& password, int& unread_out,
                         std::vector<MailSummary>& recent_out, uint32_t now,
-                        int16_t timezone_minutes, const char* pinned_ca = nullptr) {
+                        int16_t timezone_minutes, const char* pinned_ca, String& reason_out) {
     WiFiClientSecure client;
     if (pinned_ca != nullptr) {
         client.setCACert(pinned_ca);
@@ -1370,6 +1374,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     }
     if (!client.connect(host.c_str(), port, REQUEST_TIMEOUT_MS)) {
         Serial.println("  imap: TLS-соединение не установлено (сеть, сертификат или таймаут)");
+        reason_out = "imap: нет TLS-соединения (сеть, сертификат или таймаут)";
         return false;
     }
 
@@ -1385,6 +1390,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a1 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: LOGIN отвергнут (логин или пароль приложения)");
+        reason_out = "imap: LOGIN отвергнут — проверьте адрес и пароль приложения";
         return false;
     }
 
@@ -1393,6 +1399,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a2 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: SELECT INBOX не удался");
+        reason_out = "imap: SELECT INBOX не удался";
         return false;
     }
 
@@ -1401,6 +1408,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a3 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: SEARCH UNSEEN не удался");
+        reason_out = "imap: SEARCH UNSEEN не удался";
         return false;
     }
 
@@ -1603,7 +1611,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 // писать обязательно: без строки здесь «почему пусто на
                 // экране» выясняется только разбором с кабелем.
                 Serial.printf("коннектор «%s»: источник не ответил\n", c.id.c_str());
-                store.mark_failed(c.id);
+                store.mark_failed(c.id, "источник не ответил");
                 continue;
             }
             size_t taken = 0;
@@ -1661,7 +1669,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // неполученные значения просто не обновляются и стареют по ttl.
             if (succeeded == 0 && !c.map.empty()) {
                 Serial.printf("коннектор «%s»: ни один датчик не ответил\n", c.id.c_str());
-                store.mark_failed(c.id);
+                store.mark_failed(c.id, "ни один датчик не ответил");
             } else {
                 Serial.printf("коннектор «%s»: получено значений %u из %u\n", c.id.c_str(),
                               static_cast<unsigned>(succeeded),
@@ -1695,7 +1703,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 slots::Slot five_hour, week;
                 if (!parse_claude_usage(body, five_hour, week)) {
                     Serial.printf("коннектор «%s»: не удалось разобрать ответ\n", c.id.c_str());
-                    store.mark_failed(c.id);
+                    store.mark_failed(c.id, "не удалось разобрать ответ");
                 } else {
                     size_t taken = 0;
                     // Владелец хочет ОСТАТОК, не использование (как
@@ -1834,10 +1842,11 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // (не STARTTLS).
             int unread = 0;
             std::vector<MailSummary> recent;
+            String reason;
             if (!imap_fetch_mailbox(c.url, 993, c.username, c.token, unread, recent, now,
-                                    settings.timezone_minutes, kGtsRootR1Pem)) {
+                                    settings.timezone_minutes, kGtsRootR1Pem, reason)) {
                 Serial.printf("коннектор «%s»: почтовый сервер не ответил\n", c.id.c_str());
-                store.mark_failed(c.id);
+                store.mark_failed(c.id, reason.length() > 0 ? reason : String("почтовый сервер не ответил"));
             } else {
                 slots::Slot value;
                 value.number = static_cast<float>(unread);
@@ -1912,7 +1921,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             String body;
             if (!fetch(String(url), "", false, body)) {
                 Serial.printf("коннектор «%s»: источник не ответил\n", c.id.c_str());
-                store.mark_failed(c.id);
+                store.mark_failed(c.id, "источник не ответил");
                 continue;
             }
 
