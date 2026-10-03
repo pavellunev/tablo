@@ -32,7 +32,7 @@
 ## What's on the screen
 
 <p align="center">
-  <img src="docs/images/render-desk.png" alt="Default dashboard: markets, AI limits and air quality, mail, today" width="800">
+  <img src="docs/images/dashboard-desk.png" alt="Default dashboard: markets, AI limits and air quality, mail, today" width="800">
 </p>
 
 | Block | Shows | Source |
@@ -46,7 +46,7 @@
 When sources fail, every block stays on screen and explains why:
 
 <p align="center">
-  <img src="docs/images/render-failures.png" alt="All sources down: each block shows the reason" width="800">
+  <img src="docs/images/dashboard-failures.png" alt="All sources down: each block shows the reason" width="800">
 </p>
 
 ## Hardware
@@ -86,7 +86,7 @@ pio run -t uploadfs        # flash the setup page
 **First boot.** With no known network the device starts an access point named `tablo-setup` and shows its password and a QR code. Point your phone camera at the code, the setup page opens.
 
 <p align="center">
-  <img src="docs/images/render-setup.png" alt="Access point screen: network name, password and QR code" width="800">
+  <img src="docs/images/setup-access-point.png" alt="Access point screen: network name, password and QR code" width="800">
 </p>
 
 **Later.** On your home network the page is at `http://tablo-setup.local/` (the device name can be changed there). Sources are configured as cards: Claude, Codex, mail, Home Assistant, rates, weather and city. Secrets are entered once and never shown again. Hold button 1 for three seconds to force the access point.
