@@ -30,7 +30,7 @@ void air_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const 
 }  // namespace
 
 extern const Spec kAirSpec = {
-    "air", "Воздух", Size::kFlex, 202, kAirSlots, 300, &air_visible, &air_draw,
+    "air", "Air", Size::kFlex, 202, kAirSlots, 300, &air_visible, &air_draw,
 };
 
 }  // namespace widgets

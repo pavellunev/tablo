@@ -1,9 +1,45 @@
 #include "config.h"
 
+#if __has_include("secrets.h")
 #include "secrets.h"
+#endif
+
+// secrets.h опционален: без него заводские значения пустые, всё настраивается
+// на странице устройства.
+#ifndef HA_URL_DEFAULT
+#define HA_URL_DEFAULT "http://homeassistant.local:8123"
+#endif
+#ifndef HA_TOKEN_DEFAULT
+#define HA_TOKEN_DEFAULT ""
+#endif
+#ifndef CLAUDE_ACCESS_TOKEN_DEFAULT
+#define CLAUDE_ACCESS_TOKEN_DEFAULT ""
+#endif
+#ifndef CLAUDE_REFRESH_TOKEN_DEFAULT
+#define CLAUDE_REFRESH_TOKEN_DEFAULT ""
+#endif
+#ifndef CODEX_ACCESS_TOKEN_DEFAULT
+#define CODEX_ACCESS_TOKEN_DEFAULT ""
+#endif
+#ifndef CODEX_REFRESH_TOKEN_DEFAULT
+#define CODEX_REFRESH_TOKEN_DEFAULT ""
+#endif
+#ifndef IMAP_USER_DEFAULT
+#define IMAP_USER_DEFAULT ""
+#endif
+#ifndef IMAP_PASSWORD_DEFAULT
+#define IMAP_PASSWORD_DEFAULT ""
+#endif
+#ifndef WIFI_SSID_DEFAULT
+#define WIFI_SSID_DEFAULT ""
+#endif
+#ifndef WIFI_PASSWORD_DEFAULT
+#define WIFI_PASSWORD_DEFAULT ""
+#endif
 
 #include <ArduinoJson.h>
 
+#include <cstring>
 #include <vector>
 
 // Preferences (NVS) существует только на устройстве. to_json/from_json —
@@ -36,6 +72,7 @@ constexpr const char* kKey = "settings_b";         // blob
 Settings defaults() {
     Settings s;
     s.device_name = "tablo-setup";
+    s.lang = "en";
     // Домашняя сеть — заводская, из secrets.h: после перепрошивки или сброса
     // устройство подключается само, а не ждёт настройки с телефона. Пустой
     // SSID в secrets — сети нет, поднимется точка доступа как раньше.
@@ -45,16 +82,15 @@ Settings defaults() {
         home_net.password = WIFI_PASSWORD_DEFAULT;
         s.networks.push_back(home_net);
     }
-    s.timezone_minutes = 300;  // Екатеринбург, +05:00 — до первого геокодинга
+    s.timezone_minutes = 0;  // UTC до первого геокодинга города
 
-    // Заводской город. Координаты и city_resolved заполнены заранее (а не
-    // оставлены пустыми до первого выхода в сеть), чтобы погода работала
-    // сразу на новом устройстве — коннектор kind="geocode" молчит, пока
-    // city == city_resolved (docs/constructor.md, «Город вместо координат»).
-    s.city = "Екатеринбург";
-    s.city_resolved = "Екатеринбург";
-    s.city_lat = 56.8389f;
-    s.city_lon = 60.6057f;
+    // Заводской город пуст: владелец вводит его на странице настройки, пока
+    // город не задан, погода не опрашивается, а блок «Сегодня» показывает
+    // причину (connectors.cpp, kind="weather").
+    s.city = "";
+    s.city_resolved = "";
+    s.city_lat = 0.0f;
+    s.city_lon = 0.0f;
 
     // Заводские источники. Устройство берёт всё, что доступно публично, само
     // — в этом и смысл проекта: оно не должно зависеть от домашнего сервера,
@@ -235,7 +271,7 @@ Settings defaults() {
 
     {
         Dashboard desk;
-        desk.name = "Стол";
+        desk.name = "Desk";
         desk.rows[0].push_back(widget("markets", widgets::Size::kM));
         desk.rows[0].push_back(widget("limits_air", widgets::Size::kFlex));
         desk.rows[1].push_back(widget("mail", widgets::Size::kFlex));
@@ -244,7 +280,7 @@ Settings defaults() {
     }
     {
         Dashboard road;
-        road.name = "Дорога";
+        road.name = "Road";
         road.rows[0].push_back(widget("markets", widgets::Size::kM));
         road.rows[0].push_back(widget("limits", widgets::Size::kFlex));
         road.rows[1].push_back(widget("mail", widgets::Size::kFlex));
@@ -253,7 +289,7 @@ Settings defaults() {
     }
     {
         Dashboard own;
-        own.name = "Свой";
+        own.name = "Custom";
         s.dashboards.push_back(own);
     }
     s.active_dashboard = 0;
@@ -620,6 +656,7 @@ String to_json(const Settings& settings, bool include_secrets) {
     // (тесты, NATIVE_BUILD) его нет и наш шим String под неё не подходит.
     // const char* понимают обе стороны одинаково.
     doc["device_name"] = settings.device_name.c_str();
+    doc["lang"] = settings.lang.c_str();
     doc["timezone_minutes"] = settings.timezone_minutes;
 
     // Город и координаты — не секрет, отдаём всегда (не только внутреннему
@@ -757,6 +794,15 @@ bool from_json(const String& json, Settings& settings) {
         settings.ap_password = doc["ap_password"].as<const char*>();
     } else {
         settings.ap_password = prev.ap_password;
+    }
+
+    // lang — только "en"/"ru"; всё остальное (мусор, отсутствие) — прежнее.
+    if (doc["lang"].is<const char*>() &&
+        (std::strcmp(doc["lang"].as<const char*>(), "en") == 0 ||
+         std::strcmp(doc["lang"].as<const char*>(), "ru") == 0)) {
+        settings.lang = doc["lang"].as<const char*>();
+    } else {
+        settings.lang = prev.lang;
     }
 
     // city — редактируемое поле формы (страница настройки шлёт его всегда,

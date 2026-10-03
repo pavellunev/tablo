@@ -17,6 +17,7 @@
 // другой единице трансляции — тем же приёмом, что тесты (test_config)
 // подключают config.cpp исходником, а не линкуют отдельно.
 #include "../../firmware/src/config.cpp"
+#include "../../firmware/src/i18n.h"
 #include "../../firmware/src/layout.h"
 #include "../../firmware/src/slots.h"
 
@@ -82,9 +83,9 @@ slots::Store build_full_scenario() {
 
     put_number(store, "limit.claude.5h", 42, 0, 30, 240, "limits");
     put_number(store, "limit.claude.week", 78, 0, 30, 240, "limits");
-    put_text(store, "limit.claude.reset", "5 ч через 3:06 · неделя через 2 дн 22 ч", 30, 240, "limits");
+    put_text(store, "limit.claude.reset", "5h in 3:06 · week in 2d 22h", 30, 240, "limits");
     put_number(store, "limit.codex", 15, 0, 30, 240, "limits");
-    put_text(store, "limit.codex.reset", "неделя · сброс 13:01 · через 2 дн 21 ч", 30, 240,
+    put_text(store, "limit.codex.reset", "week · reset 13:01 · in 2d 21h", 30, 240,
              "limits");
 
     // НОРМА (не свежо, не тревога) — демонстрирует третье начертание тега
@@ -98,22 +99,22 @@ slots::Store build_full_scenario() {
 
     put_number(store, "mail.unread", 7, 0, 60, 900, "mail");
     put_text(store, "mail.1.from", "Home Assistant", 60, 900, "mail");
-    put_text(store, "mail.1.subject", "Батарея датчика воздуха разряжена", 60, 900, "mail");
+    put_text(store, "mail.1.subject", "Air sensor battery is low", 60, 900, "mail");
     put_text(store, "mail.1.time", "14:32", 60, 900, "mail");
     put_text(store, "mail.2.from", "GitHub", 60, 900, "mail");
     put_text(store, "mail.2.subject", "[tablo] CI passed", 60, 900, "mail");
     put_text(store, "mail.2.time", "12:05", 60, 900, "mail");
-    put_text(store, "mail.3.from", "Аэрофлот", 60, 900, "mail");
-    put_text(store, "mail.3.subject", "Регистрация на рейс открыта, посадочный внутри", 60, 900,
+    put_text(store, "mail.3.from", "Airline", 60, 900, "mail");
+    put_text(store, "mail.3.subject", "Check-in is open, boarding pass inside", 60, 900,
             "mail");
-    put_text(store, "mail.3.time", "вчера", 60, 900, "mail");
+    put_text(store, "mail.3.time", "yesterday", 60, 900, "mail");
 
     put_number(store, "weather.temp", -2, 0, 300, 3600, "today");
-    put_text(store, "weather.summary", "-4…+1 · ОБЛАЧНО", 300, 3600, "today");
+    put_text(store, "weather.summary", "-4…+1 · CLOUDY", 300, 3600, "today");
     put_text(store, "event.1.at", "10:00", 300, 3600, "today");
-    put_text(store, "event.1.title", "Синк по tablo с самим собой", 300, 3600, "today");
+    put_text(store, "event.1.title", "Sync on tablo with myself", 300, 3600, "today");
     put_text(store, "event.2.at", "18:30", 300, 3600, "today");
-    put_text(store, "event.2.title", "Забрать посылку", 300, 3600, "today");
+    put_text(store, "event.2.title", "Pick up the parcel", 300, 3600, "today");
 
     return store;
 }
@@ -132,12 +133,12 @@ slots::Store build_degraded_scenario() {
     put_number(store, "limit.claude.week", 91, 0, 4000, 240, "limits");
     // GPT данных нет, но коннектор объяснил почему — строка остаётся с текстом
     // причины вместо шкалы (prims.cpp, limits_error_text).
-    store.mark_failed(String("codex"), String("сервер просит подождать (429)"));
+    store.mark_failed(String("codex"), String(i18n::tr(i18n::Str::kRateLimited)));
 
     put_series(store, "co2", {900, 1050, 1180, 1260}, 20, 300, "air");
 
     put_number(store, "weather.temp", 5, 0, 300, 3600, "today");
-    put_text(store, "weather.summary", "+2…+7 · ЯСНО", 300, 3600, "today");
+    put_text(store, "weather.summary", "+2…+7 · CLEAR", 300, 3600, "today");
 
     return store;
 }
@@ -162,7 +163,7 @@ bool render(const slots::Store& store, const layout::DeviceInfo& device, const s
 // проверке разойдётся строка — расхождение сразу увидит тот, кто это читает.
 bool render_boot(const std::string& path) {
     canvas::CanvasMemory canvas(800, 480);
-    layout::draw_boot(canvas, "включение · ищем сохранённую сеть…");
+    layout::draw_boot(canvas, i18n::tr(i18n::Str::kBootStatus));
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
     return ok;
@@ -172,12 +173,12 @@ bool render_boot(const std::string& path) {
 // исчезает, каждый объясняет (правило владельца, 2026-09-22).
 slots::Store build_failures_scenario() {
     slots::Store store;
-    store.mark_failed(String("btc"), String("источник не ответил (код 503)"));
-    store.mark_failed(String("home"), String("Home Assistant не отвечает"));
-    store.mark_failed(String("claude"), String("сервер просит подождать (429)"));
-    store.mark_failed(String("codex"), String("токен протух — обновите на странице настройки"));
-    store.mark_failed(String("mail"), String("imap: LOGIN отвергнут — проверьте пароль приложения"));
-    store.mark_failed(String("weather"), String("источник не ответил"));
+    store.mark_failed(String("btc"), String("source did not respond (code 503)"));
+    store.mark_failed(String("home"), String("Home Assistant is not responding"));
+    store.mark_failed(String("claude"), String(i18n::tr(i18n::Str::kRateLimited)));
+    store.mark_failed(String("codex"), String("token expired — update it on the setup page"));
+    store.mark_failed(String("mail"), String("imap: LOGIN rejected — check the app password"));
+    store.mark_failed(String("weather"), String(i18n::tr(i18n::Str::kSourceNoAnswer)));
     return store;
 }
 
@@ -195,6 +196,8 @@ int main(int argc, char** argv) {
     std::string out_dir = argc > 1 ? argv[1] : "tools/render_frame/out";
     std::string mk = "mkdir -p " + out_dir;
     std::system(mk.c_str());
+
+    i18n::set_lang(i18n::Lang::kEn);
 
     layout::DeviceInfo device;
     device.wifi_rssi = -62;

@@ -38,7 +38,7 @@ void limits_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, con
 }  // namespace
 
 extern const Spec kLimitsSpec = {
-    "limits", "Лимиты AI", Size::kFlex, 202, kLimitsSlots, 300, &limits_visible, &limits_draw,
+    "limits", "AI limits", Size::kFlex, 202, kLimitsSlots, 300, &limits_visible, &limits_draw,
 };
 
 }  // namespace widgets

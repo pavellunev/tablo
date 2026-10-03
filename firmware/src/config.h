@@ -97,6 +97,7 @@ struct Settings {
     std::vector<Network> networks;
     std::vector<Connector> connectors;
     String device_name;  // имя точки доступа и mDNS
+    String lang = "en";  // язык экрана: "en" или "ru"
     // Смещение от UTC в минутах: int8_t не вмещает +330 (Индия) и +480
     // (Китай) — для устройства, которое возят с собой, это не редкий край.
     int16_t timezone_minutes;

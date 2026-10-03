@@ -1,157 +1,144 @@
 <p align="center">
-  <img src="docs/images/panel-photo.jpg" alt="tablo на столе: курсы, лимиты AI, воздух в кабинете, почта и погода на e-ink панели 7,5 дюйма" width="820">
+  <img src="docs/images/panel-photo.jpg" alt="tablo e-ink dashboard on a desk: markets, Claude and Codex limits, air quality, mail and weather" width="820">
 </p>
 
 <h1 align="center">tablo</h1>
 
 <p align="center">
-  Автономный e-ink дашборд, который работает там, куда его привезли.<br>
-  Сам ходит за данными, сам рисует кадр, настраивается с телефона.
+  Self-contained e-ink dashboard firmware for the TRMNL 7.5" DIY kit (ESP32-S3).<br>
+  Crypto and forex rates, Claude Code and Codex usage limits, air quality, unread mail, weather. No server required.
 </p>
 
 <p align="center">
-  <a href="#идея">Идея</a> ·
-  <a href="#что-на-экране">Что на экране</a> ·
-  <a href="#как-это-устроено">Как устроено</a> ·
-  <a href="#быстрый-старт">Быстрый старт</a> ·
-  <a href="#конструктор">Конструктор</a> ·
-  <a href="docs/decisions.md">Решения</a>
+  <a href="https://github.com/pavellunev/tablo/actions/workflows/ci.yml"><img src="https://github.com/pavellunev/tablo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/pavellunev/tablo/releases"><img src="https://img.shields.io/github/v/release/pavellunev/tablo?include_prereleases" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
 </p>
-
----
-
-- **Автономный.** Курсы, погода, лимиты Claude и Codex по OAuth, почта по IMAP — устройство берёт всё само, без сервера-посредника.
-- **Честный экран.** Устаревшее помечено, ноль не подменяет отсутствие, отказавший источник объясняет причину.
-- **Три экрана** переключаются кнопками на плате и собираются из виджетов на странице настройки.
-- **Настройка с телефона.** Точка доступа с QR при первом включении, дальше — страница в домашней сети.
-- **Бережно к e-ink.** Частичное обновление только при изменениях, полное — раз в час.
-
-## Идея
-
-Обычный e-ink дашборд — это сервер, который рисует картинку, и панель,
-которая её показывает. Пока панель дома, схема хороша; в поездке сервер
-недоступен, сеть другая, а чтобы сменить Wi-Fi, нужен ноутбук с кабелем.
-
-`tablo` — альтернатива серверному рендеру. Кадр считается на самом
-устройстве, данные оно берёт напрямую из источников, а всё, что зависит от
-места, настраивается на месте с телефона. Домашний сервер — только источник
-домашних датчиков: нет его рядом — блок с датчиками уходит с экрана,
-остальное живёт.
-
-## Что на экране
 
 <p align="center">
-  <img src="docs/images/render-desk.png" alt="Кадр «Стол»: рынки, лимиты AI и воздух, почта, сегодня" width="800">
+  English · <a href="README.ru.md">Русский</a>
 </p>
 
-Заводской экран «Стол». Каркас кадра сверяется с эталонным макетом скриптом
-`tools/compare_frame.py` при каждом изменении, чтобы вёрстка не расползалась.
+## Features
 
-| Блок | Что показывает | Откуда |
+- **Standalone.** The ESP32 fetches data straight from Binance, the Central Bank of Russia, Anthropic, OpenAI, Open-Meteo, Home Assistant and your IMAP mailbox, then renders the frame itself. No home server, no cloud relay, no companion app.
+- **Claude Code and Codex limits on your desk.** Remaining 5-hour and weekly windows, time to reset. OAuth tokens are refreshed on the device.
+- **Honest display.** Stale values are marked, a failed source shows the reason instead of disappearing, zero is never drawn in place of "no data".
+- **Three dashboards** switched with the on-board buttons, composed from widgets on the setup page.
+- **Phone setup.** Access point with a QR code on first boot, then a web page on your home network. UI in English or Russian.
+- **E-ink friendly.** Partial refresh only when something changed, full refresh once an hour.
+- **Prebuilt firmware** in [Releases](https://github.com/pavellunev/tablo/releases), host-side tests and frame rendering without hardware.
+
+## What's on the screen
+
+<p align="center">
+  <img src="docs/images/render-desk.png" alt="Default dashboard: markets, AI limits and air quality, mail, today" width="800">
+</p>
+
+| Block | Shows | Source |
 |---|---|---|
-| **Рынки** | BTC с графиком за сутки, USD и EUR к рублю с изменением за день | Binance, ЦБ РФ |
-| **Лимиты · остаток** | Остаток пятичасового и недельного окна Claude, недельного окна Codex, время до сброса | OAuth-токены Anthropic и OpenAI; устройство обновляет их само |
-| **Кабинет · воздух** | CO₂ и TVOC с графиком за 6 часов и оценкой «норма / проветрить» | Home Assistant по токену |
-| **Почта** | Счётчик непрочитанных и последние четыре письма | IMAP напрямую |
-| **Сегодня** | Температура и описание погоды по названию города | Open-Meteo; город → координаты и часовой пояс автоматически |
+| **Markets** | BTC with a 24-hour chart, USD and EUR rates with daily change | Binance, Central Bank of Russia |
+| **Limits** | Remaining Claude 5-hour and weekly windows, Codex weekly window, time to reset | Anthropic and OpenAI OAuth usage endpoints |
+| **Air** | CO₂ and TVOC with a 6-hour chart and a "fresh / ok / ventilate" state | Home Assistant |
+| **Mail** | Unread count and the last four messages | IMAP |
+| **Today** | Temperature and weather summary for your city | Open-Meteo, geocoding and time zone resolved automatically |
 
-Экран честный. Устаревшее значение помечается «≈», ноль не рисуется вместо
-отсутствия, а отказавший источник остаётся на экране с причиной, а не
-исчезает молча.
+When sources fail, every block stays on screen and explains why:
 
 <p align="center">
-  <img src="docs/images/render-failures.png" alt="Все источники отвалились: каждый блок объясняет причину" width="800">
+  <img src="docs/images/render-failures.png" alt="All sources down: each block shows the reason" width="800">
 </p>
 
-## Как это устроено
+## Hardware
 
-```
-  источники ────► коннекторы ────► слоты ────► виджеты ────► кадр 800×480
-  Binance, ЦБ,    HTTP/JSON,       btc,        markets,      Terminus +
-  Anthropic,      OAuth-refresh,   limit.*,    limits, air,  IBM Plex Mono,
-  OpenAI, IMAP,   IMAP-диалог,     co2,        mail, today,  1 бит, частичное
-  Open-Meteo, HA  разбор ответа    mail.*      metric, text  обновление
-```
+[Seeed Studio TRMNL 7.5" OG DIY Kit](https://www.seeedstudio.com/TRMNL-7-5-Inch-OG-DIY-Kit-p-6481.html):
+XIAO ESP32-S3 (8 MB flash, 8 MB PSRAM), 7.5" 800×480 monochrome e-paper, three buttons, battery with charge measurement.
+The stand in the photo is an [L-shaped case from MakerWorld](https://makerworld.com/en/models/1625065-trmnl-7-5-og-diy-kit-l-shape).
 
-**Коннектор** знает, как поговорить с источником и какие слоты он даёт.
-**Виджет** объявляет, какие слоты ему нужны, как часто и как он рисуется.
-Система сводит одно с другим: коннектор без виджета на экранах не опрашивается
-вовсе, интервал опроса складывается из потребностей виджетов и ограничений
-источника. Добавить виджет — один файл и строка в реестре:
-[docs/widgets.md](docs/widgets.md).
+## Install
 
-Три дашборда переключаются кнопками на плате. Собираются они на странице
-настройки: палитра виджетов, размеры S / M / гибкий, предпросмотр —
-[docs/constructor.md](docs/constructor.md).
+### Prebuilt firmware
 
-Панель обновляется частично не чаще раза в пять минут и только когда есть что
-показать нового; полностью — раз в час, чтобы снять остаточное изображение.
-
-## Быстрый старт
-
-**Железо.** [Seeed Studio TRMNL 7.5" OG DIY Kit](https://www.seeedstudio.com/TRMNL-7-5-Inch-OG-DIY-Kit-p-6481.html)
-(в России — [на Ozon](https://www.ozon.ru/product/seeed-studio-trmnl-byod-7-5-og-diy-nabor-dlya-e-ink-monohromnyy-e-ink-displey-800x480-xiao-esp32-s3-2887044566/)):
-XIAO ESP32-S3 (8 МБ flash, 8 МБ PSRAM) и монохромная e-ink панель 7,5"
-800×480. Три кнопки платы, батарея с замером заряда. Подставка на фото —
-[L-образный корпус с MakerWorld](https://makerworld.com/ru/models/1625065-trmnl-7-5-og-diy-kit-l-shape),
-печатается за вечер.
-
-**Сборка.** Нужны [PlatformIO](https://platformio.org/) и Python 3 (для
-хостовых инструментов — ещё `pillow` и `numpy`). Перед первой сборкой скопируйте
-`firmware/src/secrets.h.example` в `firmware/src/secrets.h` и заполните:
-домашняя сеть, токен Home Assistant, пароль приложения почты, пары
-OAuth-токенов. Файл под `.gitignore`; без него сборка не пройдёт намеренно.
+Download `tablo-<version>-full.bin` from [Releases](https://github.com/pavellunev/tablo/releases) and flash it at address `0x0`:
 
 ```bash
-pio run                    # собрать
-pio run -t upload          # прошить
-pio run -t uploadfs        # залить страницу настройки
-./scripts/verify.sh        # сборка + хостовые тесты
+pip install esptool
+esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 tablo-<version>-full.bin
 ```
 
-**Первое включение.** Устройство подключается к сети из `secrets.h`. Нет
-сети — поднимает точку доступа `tablo-setup` и рисует на панели её пароль и
-QR: наведите камеру телефона, страница настройки откроется сама.
+Without a command line: open [web.esphome.io](https://web.esphome.io) in Chrome, connect the board over USB and pick the same file.
+
+### Build from source
+
+Requires [PlatformIO](https://platformio.org/) and Python 3.
+
+```bash
+pio run                    # build
+pio run -t upload          # flash firmware
+pio run -t uploadfs        # flash the setup page
+./scripts/verify.sh        # build + host-side tests
+```
+
+`firmware/src/secrets.h` is optional. Copy it from `secrets.h.example` if you want Wi-Fi and tokens baked into the image; otherwise enter everything on the setup page.
+
+## Setup
+
+**First boot.** With no known network the device starts an access point named `tablo-setup` and shows its password and a QR code. Point your phone camera at the code, the setup page opens.
 
 <p align="center">
-  <img src="docs/images/render-setup.png" alt="Экран точки доступа: имя сети, пароль и QR" width="800">
+  <img src="docs/images/render-setup.png" alt="Access point screen: network name, password and QR code" width="800">
 </p>
 
-**Дальше.** Из домашней сети страница доступна по `http://tablo-setup.local/`
-(имя устройства меняется там же). На странице: сети, источники карточками —
-Claude, Codex, почта, умный дом, курсы, погода и город — и экраны. Секреты
-вводятся один раз и наружу больше не показываются; при смене адреса источника
-секрет нужно ввести заново, так задумано. Удержание кнопки 1 три секунды
-поднимает точку доступа принудительно.
+**Later.** On your home network the page is at `http://tablo-setup.local/` (the device name can be changed there). Sources are configured as cards: Claude, Codex, mail, Home Assistant, rates, weather and city. Secrets are entered once and never shown again. Hold button 1 for three seconds to force the access point.
 
-## Конструктор
+**Credentials.**
 
-| Размер | Пиксели | Смысл |
+| Source | What to enter | Where to get it |
 |---|---|---|
-| `S` | 202 | узкая колонка, как «Сегодня» |
-| `M` | 296 | средняя, как «Рынки» |
-| `flex` | остаток | делит оставшееся поровну с другими гибкими |
+| Claude | OAuth access + refresh token | Claude Code login: `~/.claude/.credentials.json` (macOS: Keychain item "Claude Code-credentials") |
+| Codex | OAuth access + refresh token | Codex CLI login: `~/.codex/auth.json` |
+| Mail | IMAP server, address, app password | Your provider's app passwords (Gmail: Security → App passwords) |
+| Home Assistant | URL, long-lived access token | HA profile → Security → Long-lived access tokens |
+| Rates, weather | nothing | public APIs |
 
-Ряд собирается из видимых виджетов: невидимый не оставляет дыры, соседи
-получают его место; не влезло — ряд делится поровну, ничего не уезжает за
-край. Базовый набор: рынки, лимиты, воздух, лимиты + воздух, почта, сегодня,
-показатель (любой слот крупно) и подпись.
+Anthropic and OpenAI usage endpoints are not reachable from every region. The device reports this on screen instead of showing zeros.
 
-## Проверка без устройства
+## Dashboards and widgets
 
-`tools/render_frame/build_and_run.sh` снимает PNG тем же кодом раскладки, что
-работает на панели: три дашборда, экран включения, точка доступа, сценарии
-«источники отвалились». `tools/compare_frame.py` сверяет каркас линий с
-эталоном. Слоты, конфигурация, раскладка, расписание опроса и кнопки покрыты
-хостовыми тестами; `scripts/verify.sh` гоняет их вместе со сборкой прошивки.
+Three dashboards are switched with buttons 1–3. Each is built on the setup page from a widget palette with a live preview.
 
-## Документы
+| Size | Width | Meaning |
+|---|---|---|
+| `S` | 202 px | narrow column, like Today |
+| `M` | 296 px | medium, like Markets |
+| `flex` | remaining | shares the rest of the row with other flex widgets |
 
-- [docs/decisions.md](docs/decisions.md) — решения и их цена: рендер на устройстве, OAuth и IMAP без посредника, настройка из любой сети, HTTPS с закреплёнными корнями.
-- [docs/architecture.md](docs/architecture.md) — слоты, коннекторы, раскладка.
-- [docs/widgets.md](docs/widgets.md) — как добавить виджет.
-- [docs/constructor.md](docs/constructor.md) — дашборды, палитра, мастер источников.
+A hidden widget leaves no gap, its neighbours take the space. Built-in widgets: markets, limits, air, limits + air, mail, today, metric (any slot, large) and caption.
 
-## Лицензия
+Adding a widget is one file plus a registry entry. Widgets declare which data slots they need and how often, and the device polls a source only when some visible widget needs it. See [docs/widgets.md](docs/widgets.md).
 
-MIT. Шрифты Terminus и IBM Plex Mono — SIL OFL 1.1, см. `firmware/assets/`.
+## Development
+
+```
+sources ──► connectors ──► slots ──► widgets ──► 800×480 frame
+Binance,    HTTP/JSON,     btc,      markets,    1-bit canvas,
+Anthropic,  OAuth refresh, limit.*,  limits,     Terminus +
+OpenAI,     IMAP dialog,   co2,      air, mail,  IBM Plex Mono,
+Open-Meteo, parsing        mail.*    today, …    partial refresh
+```
+
+- `scripts/verify.sh` builds the firmware and runs host-side tests (slots, config, layout, polling schedule, buttons). `--fast` skips tests.
+- `tools/render_frame/build_and_run.sh` renders every screen to PNG with the same layout code that runs on the panel: three dashboards, boot and access point screens, failure scenarios.
+- `tools/compare_frame.py` checks the frame skeleton against the reference mockup.
+- CI runs the same build and tests on every push. A `v*` tag publishes a release with `full`, `firmware` and `littlefs` images.
+
+Documentation (Russian for now):
+
+- [docs/decisions.md](docs/decisions.md) — design decisions and their cost: on-device rendering, OAuth and IMAP without a relay, setup from any network, HTTPS with pinned roots.
+- [docs/architecture.md](docs/architecture.md) — slots, connectors, layout.
+- [docs/widgets.md](docs/widgets.md) — how to add a widget.
+- [docs/constructor.md](docs/constructor.md) — dashboards, palette, source wizard.
+
+## License
+
+MIT. Fonts Terminus and IBM Plex Mono are under SIL OFL 1.1, see `firmware/assets/`.

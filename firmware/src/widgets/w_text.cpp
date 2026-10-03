@@ -28,7 +28,7 @@ void text_draw(Canvas& c, const Store&, const DeviceInfo&, Rect r, const Instanc
 }  // namespace
 
 extern const Spec kTextSpec = {
-    "text", "Подпись", Size::kS, 120, nullptr, 0, &text_visible, &text_draw,
+    "text", "Caption", Size::kS, 120, nullptr, 0, &text_visible, &text_draw,
 };
 
 }  // namespace widgets

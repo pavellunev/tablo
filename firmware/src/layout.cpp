@@ -19,6 +19,7 @@
 #include "../assets/terminus_24.h"
 #include "config.h"
 #include "font.h"
+#include "i18n.h"
 #include "widgets/prims.h"
 #include "widgets/widget.h"
 #include "wifi_qr.h"
@@ -44,10 +45,6 @@ constexpr int16_t ROW_GAP = 12;         // 310 - 298
 // эталоне (19 против 17), см. docs/widgets.md, «Правило ряда».
 constexpr int16_t TOP_GAP = 19;     // между Рынками и правой колонкой
 constexpr int16_t BOTTOM_GAP = 17;  // между Почтой и Сегодня
-
-const char* const WEEKDAYS[7] = {"ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"};
-const char* const MONTHS[12] = {"ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА",   "АПРЕЛЯ", "МАЯ",    "ИЮНЯ",
-                                 "ИЮЛЯ",   "АВГУСТА", "СЕНТЯБРЯ", "ОКТЯБРЯ", "НОЯБРЯ", "ДЕКАБРЯ"};
 
 // ── арифметика календаря (алгоритм civil_from_days, H. Hinnant, public
 // domain) — не тянем <ctime>/localtime ради пяти чисел и чтобы поведение не
@@ -106,8 +103,8 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
     Civil now_civil = to_civil(d.now, d.timezone_minutes);
 
     char date_buf[48];
-    std::snprintf(date_buf, sizeof(date_buf), "%s · %d %s", WEEKDAYS[now_civil.weekday],
-                  now_civil.day, MONTHS[now_civil.month - 1]);
+    std::snprintf(date_buf, sizeof(date_buf), "%s · %d %s", i18n::weekday(now_civil.weekday),
+                  now_civil.day, i18n::month(now_civil.month - 1));
     draw_text(c, fonts::Terminus24, MARGIN, 32, date_buf, Color::Black, 1, /*bold=*/true);
 
     char clock_buf[24];
@@ -151,8 +148,10 @@ void draw_header(Canvas& c, const DeviceInfo& d) {
 String format_decimal(float value, int decimals) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.*f", decimals, static_cast<double>(value));
+    // Десятичный разделитель — по языку экрана: «96,40» для ru, «96.40» для en.
+    const char point = i18n::lang() == i18n::Lang::kRu ? ',' : '.';
     for (char* p = buf; *p; ++p) {
-        if (*p == '.') *p = ',';
+        if (*p == '.') *p = point;
     }
 
     // Разряды целой части разделяем пробелом: «80 689» вместо «80689». На
@@ -161,7 +160,7 @@ String format_decimal(float value, int decimals) {
     // хостовый шим не умеет индексацию, а вести две ветки ради форматирования
     // числа — лишнее.
     int int_end = 0;
-    while (buf[int_end] != '\0' && buf[int_end] != ',') ++int_end;
+    while (buf[int_end] != '\0' && buf[int_end] != point) ++int_end;
     const int digits_start = (buf[0] == '-' || buf[0] == '+') ? 1 : 0;
     if (int_end - digits_start <= 4) return String(buf);  // до четырёх цифр группировка мешает
 
@@ -489,7 +488,7 @@ void draw_boot(Canvas& canvas, const char* status) {
     // слова, не экрана: это подпись к имени, а не разделитель рядов.
     canvas.fill_rect(static_cast<int16_t>(cx - name_w / 2), 246, name_w, 2, Color::Black);
 
-    const char* tagline = "АВТОНОМНЫЙ E-INK ДАШБОРД";
+    const char* tagline = i18n::tr(i18n::Str::kTagline);
     const int16_t tag_w = text_width(fonts::Terminus14, tagline);
     draw_text(canvas, fonts::Terminus14, static_cast<int16_t>(cx - tag_w / 2), 276, tagline,
               Color::Black, 1, /*bold=*/true);
@@ -507,7 +506,7 @@ void draw_boot(Canvas& canvas, const char* status) {
 void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& password) {
     canvas.fill(Color::White);
 
-    draw_text(canvas, fonts::Terminus24, MARGIN, AP_TITLE_Y, "НАСТРОЙКА TABLO", Color::Black, 1,
+    draw_text(canvas, fonts::Terminus24, MARGIN, AP_TITLE_Y, i18n::tr(i18n::Str::kApSetup), Color::Black, 1,
               /*bold=*/true);
     canvas.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(canvas.width() - 2 * MARGIN), 2,
                      Color::Black);
@@ -536,14 +535,14 @@ void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& passw
     // (используется для курсов и процентов) — букв SSID/пароля в нём просто
     // нет, глиф молча не рисуется (font.h: find_glyph возвращает nullptr, а
     // draw_text пропускает символ). Terminus покрывает весь ASCII.
-    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "СЕТЬ");
+    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, i18n::tr(i18n::Str::kNetwork));
     y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 34);
     draw_text(canvas, fonts::Terminus24, MARGIN, y,
               widgets::prims::truncate_to_width(fonts::Terminus24, ssid.c_str(), text_w).c_str(),
               Color::Black, 1, /*bold=*/true);
 
     y = static_cast<int16_t>(y + 50);
-    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, "ПАРОЛЬ");
+    widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0}, i18n::tr(i18n::Str::kPassword));
     y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 56);
     // Terminus24 при scale=2 — тот же приём, что курс BTC в блоке Рынков
     // (см. font.h про kern 48 без пятого файла шрифта): пароль должен быть
@@ -556,10 +555,10 @@ void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& passw
 
     y = static_cast<int16_t>(y + 60);
     draw_text(canvas, fonts::Terminus14, MARGIN, y,
-              "наведите камеру телефона на QR — сеть добавится сама,", Color::Black, 1, false);
+              i18n::tr(i18n::Str::kApHint1), Color::Black, 1, false);
     y = static_cast<int16_t>(y + 22);
     draw_text(canvas, fonts::Terminus14, MARGIN, y,
-              "не считалось — введите сеть и пароль вручную.", Color::Black, 1, false);
+              i18n::tr(i18n::Str::kApHint2), Color::Black, 1, false);
 }
 
 }  // namespace layout

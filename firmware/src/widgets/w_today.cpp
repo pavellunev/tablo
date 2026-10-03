@@ -7,6 +7,7 @@
 #include "../assets/plexmono_28.h"
 #include "../assets/terminus_14.h"
 #include "prims.h"
+#include "../i18n.h"
 
 namespace widgets {
 
@@ -41,10 +42,10 @@ bool today_visible(const Store& store, const Instance&) {
 
 void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const Instance&) {
     if (!today_has_data(store)) {
-        prims::draw_reason_block(c, r, "СЕГОДНЯ", prims::failure_reason(store, kTodayStatus));
+        prims::draw_reason_block(c, r, i18n::tr(i18n::Str::kToday), prims::failure_reason(store, kTodayStatus));
         return;
     }
-    prims::draw_eyebrow(c, r, "СЕГОДНЯ");
+    prims::draw_eyebrow(c, r, i18n::tr(i18n::Str::kToday));
     int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 34);
 
     const Slot* temp = store.find("weather.temp");
@@ -87,7 +88,7 @@ void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const 
 }  // namespace
 
 extern const Spec kTodaySpec = {
-    "today", "Сегодня", Size::kS, 202, kTodaySlots, 1800, &today_visible, &today_draw,
+    "today", "Today", Size::kS, 202, kTodaySlots, 1800, &today_visible, &today_draw,
 };
 
 }  // namespace widgets

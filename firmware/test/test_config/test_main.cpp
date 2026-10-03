@@ -11,6 +11,7 @@
 #include <string>
 
 #include "../../src/widgets/types.cpp"  // config.cpp зовёт widgets::find_type/size_*
+#include "../../src/i18n.cpp"
 #include "../../src/config.cpp"
 
 void setUp() {}
@@ -382,6 +383,43 @@ static void test_from_json_missing_city_keeps_previous() {
     TEST_ASSERT_EQUAL_FLOAT(-9.1f, settings.city_lon);
 }
 
+static void test_defaults_are_neutral() {
+    config::Settings s = config::defaults();
+    TEST_ASSERT_EQUAL_STRING("", s.city.c_str());
+    TEST_ASSERT_EQUAL_STRING("", s.city_resolved.c_str());
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s.city_lat);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s.city_lon);
+    TEST_ASSERT_EQUAL_INT(0, s.timezone_minutes);
+    TEST_ASSERT_EQUAL_STRING("en", s.lang.c_str());
+    TEST_ASSERT_EQUAL_STRING("Desk", s.dashboards[0].name.c_str());
+    TEST_ASSERT_EQUAL_STRING("Road", s.dashboards[1].name.c_str());
+    TEST_ASSERT_EQUAL_STRING("Custom", s.dashboards[2].name.c_str());
+}
+
+// ── Settings.lang ──
+
+static void test_lang_round_trip() {
+    config::Settings settings;
+    TEST_ASSERT_EQUAL_STRING("en", settings.lang.c_str());
+    settings.lang = "ru";
+    String raw = config::to_json(settings, /*include_secrets=*/true);
+    config::Settings loaded;
+    config::from_json(raw, loaded);
+    TEST_ASSERT_EQUAL_STRING("ru", loaded.lang.c_str());
+}
+
+static void test_from_json_garbage_lang_keeps_previous() {
+    config::Settings settings;
+    settings.lang = "ru";
+    String payload = "{\"lang\":\"de\"}";
+    config::from_json(payload, settings);
+    TEST_ASSERT_EQUAL_STRING("ru", settings.lang.c_str());
+
+    payload = "{}";
+    config::from_json(payload, settings);
+    TEST_ASSERT_EQUAL_STRING("ru", settings.lang.c_str());
+}
+
 static void test_round_trip_keeps_city_fields() {
     config::Settings settings;
     settings.city = "Екатеринбург";
@@ -729,6 +767,9 @@ int main() {
     RUN_TEST(test_round_trip_keeps_slot_mapping_extras);
     RUN_TEST(test_from_json_missing_city_keeps_previous);
     RUN_TEST(test_round_trip_keeps_city_fields);
+    RUN_TEST(test_defaults_are_neutral);
+    RUN_TEST(test_lang_round_trip);
+    RUN_TEST(test_from_json_garbage_lang_keeps_previous);
     RUN_TEST(test_merge_missing_factory_connectors_adds_new_by_id);
     RUN_TEST(test_merge_missing_factory_connectors_replaces_changed_kind);
     RUN_TEST(test_merge_missing_factory_connectors_keeps_user_edited_connector);

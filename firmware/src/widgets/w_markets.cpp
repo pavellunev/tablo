@@ -7,6 +7,7 @@
 #include "../assets/plexmono_41.h"
 #include "../assets/terminus_14.h"
 #include "prims.h"
+#include "../i18n.h"
 
 namespace widgets {
 
@@ -43,10 +44,10 @@ bool markets_visible(const Store& store, const Instance&) {
 
 void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const Instance&) {
     if (!markets_has_data(store)) {
-        prims::draw_reason_block(c, r, "РЫНКИ", prims::failure_reason(store, kMarketsStatus));
+        prims::draw_reason_block(c, r, i18n::tr(i18n::Str::kMarkets), prims::failure_reason(store, kMarketsStatus));
         return;
     }
-    prims::draw_eyebrow(c, r, "РЫНКИ");
+    prims::draw_eyebrow(c, r, i18n::tr(i18n::Str::kMarkets));
     int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset);  // базовая линия эйброу
 
     const Slot* btc = store.find("btc");
@@ -61,7 +62,7 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
         int16_t dw = text_width(fonts::Terminus14, delta.c_str());
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
                   delta.c_str(), Color::Black, 1, /*bold=*/true);
-        const char* period = "ЗА 24 Ч";
+        const char* period = i18n::tr(i18n::Str::kLast24h);
         int16_t pw = text_width(fonts::Terminus14, period);
         draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - pw),
                   static_cast<int16_t>(label_baseline + 18), period, Color::Black, 1, /*bold=*/true);
@@ -108,7 +109,7 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
 }  // namespace
 
 extern const Spec kMarketsSpec = {
-    "markets", "Рынки", Size::kM, 202, kMarketsSlots, 300, &markets_visible, &markets_draw,
+    "markets", "Markets", Size::kM, 202, kMarketsSlots, 300, &markets_visible, &markets_draw,
 };
 
 }  // namespace widgets

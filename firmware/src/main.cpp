@@ -16,6 +16,7 @@
 #include "config.h"
 #include "connectors.h"
 #include "display.h"
+#include "i18n.h"
 #include "layout.h"
 #include "netman.h"
 #include "portal.h"
@@ -158,18 +159,25 @@ void setup() {
     delay(300);  // USB CDC поднимается не мгновенно; иначе первые строки пропадают
     Serial.println("tablo: старт");
 
+    // Конфиг читаем до экрана включения: язык надписей берётся из него.
+    const config::Settings settings = config::load();
+    i18n::set_lang(i18n::from_code(settings.lang.c_str()));
+
     display::begin();
     display::show_boot_screen();
     battery::begin();
     buttons::begin();
 
-    netman::begin(config::load());
+    netman::begin(settings);
     portal::begin();
 
     Serial.printf("tablo: сеть — %s\n", netman::status_text().c_str());
 }
 
 void loop() {
+    // Язык могли сменить на странице настройки — подхватываем без перезагрузки.
+    i18n::set_lang(i18n::from_code(netman::settings().lang.c_str()));
+
     netman::loop();
     portal::loop();
 

@@ -41,6 +41,7 @@ g++ -std=gnu++17 -O1 -DNATIVE_BUILD \
     firmware/src/canvas.cpp \
     firmware/src/canvas_mem.cpp \
     firmware/src/font.cpp \
+    firmware/src/i18n.cpp \
     firmware/src/slots.cpp \
     firmware/src/wifi_qr.cpp \
     firmware/src/widgets/types.cpp \

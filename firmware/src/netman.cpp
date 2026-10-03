@@ -428,9 +428,9 @@ String status_text() {
         case Mode::kStation:
             return WiFi.SSID();
         case Mode::kAccessPoint:
-            return "точка доступа";
+            return "access point";
         default:
-            return "подключение…";
+            return "connecting…";
     }
 }
 

@@ -5,6 +5,7 @@
 
 #include "board.h"
 #include "canvas_gxepd2.h"
+#include "i18n.h"
 
 namespace {
 
@@ -52,7 +53,7 @@ void show_boot_screen() {
     canvas::CanvasGxEPD2<Panel> canvas(epd);
     epd.firstPage();
     do {
-        layout::draw_boot(canvas, "включение · ищем сохранённую сеть…");
+        layout::draw_boot(canvas, i18n::tr(i18n::Str::kBootStatus));
     } while (epd.nextPage());
 }
 

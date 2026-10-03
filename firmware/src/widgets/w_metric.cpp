@@ -61,7 +61,7 @@ void metric_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r,
 }  // namespace
 
 extern const Spec kMetricSpec = {
-    "metric", "Показатель", Size::kS, 120, nullptr, 300, &metric_visible, &metric_draw,
+    "metric", "Metric", Size::kS, 120, nullptr, 300, &metric_visible, &metric_draw,
 };
 
 }  // namespace widgets

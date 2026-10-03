@@ -5,6 +5,7 @@
 
 #include "../assets/terminus_14.h"
 #include "prims.h"
+#include "../i18n.h"
 
 namespace widgets {
 
@@ -43,7 +44,7 @@ constexpr int16_t kTimeRightInset = 18;
 
 void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const Instance&) {
     int16_t header_baseline = static_cast<int16_t>(r.y + 12);
-    int16_t plate_w = prims::draw_inverse_label(c, r.x, header_baseline, "ПОЧТА");
+    int16_t plate_w = prims::draw_inverse_label(c, r.x, header_baseline, i18n::tr(i18n::Str::kMail));
 
     const char* reason = layout::has_data(store.find("mail.unread"))
                              ? nullptr
@@ -59,7 +60,7 @@ void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const I
     const Slot* unread = store.find("mail.unread");
     char summary[32];
     int count = layout::has_data(unread) ? static_cast<int>(unread->number) : 0;
-    std::snprintf(summary, sizeof(summary), "%d НЕПРОЧИТАННЫХ", count);
+    std::snprintf(summary, sizeof(summary), i18n::tr(i18n::Str::kUnreadFmt), count);
     draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + plate_w + 10), header_baseline,
               summary, Color::Black, 1, /*bold=*/true);
 
@@ -92,16 +93,20 @@ void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const I
                                                      static_cast<int16_t>(kSubjectX - kDotSize - 16));
             draw_text(c, fonts::Terminus14, text_x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
         }
+        // Колонка времени: «14:32» укладывается в kTimeReserve, «yesterday» —
+        // нет, поэтому резерв берём от реальной ширины текста, иначе тема
+        // письма налезает на него.
+        const Slot* at = store.find(String(time_id));
+        int16_t tw = layout::has_data(at) ? text_width(fonts::Terminus14, at->text.c_str()) : 0;
+        int16_t time_reserve = static_cast<int16_t>(tw + 12 > kTimeReserve ? tw + 12 : kTimeReserve);
         if (layout::has_data(subject)) {
-            int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - kTimeReserve - kTimeRightInset);
+            int16_t subject_w = static_cast<int16_t>(r.w - kSubjectX - time_reserve - kTimeRightInset);
             String label =
                 prims::truncate_to_width(fonts::Terminus14, subject->text.c_str(), subject_w);
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + kSubjectX), y,
                       label.c_str(), Color::Black, 1, /*bold=*/true);
         }
-        const Slot* at = store.find(String(time_id));
         if (layout::has_data(at)) {
-            int16_t tw = text_width(fonts::Terminus14, at->text.c_str());
             draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - kTimeRightInset - tw),
                       y, at->text.c_str(), Color::Black, 1, /*bold=*/true);
         }
@@ -113,7 +118,7 @@ void mail_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const I
 }  // namespace
 
 extern const Spec kMailSpec = {
-    "mail", "Почта", Size::kFlex, 202, kMailSlots, 900, &mail_visible, &mail_draw,
+    "mail", "Mail", Size::kFlex, 202, kMailSlots, 900, &mail_visible, &mail_draw,
 };
 
 }  // namespace widgets

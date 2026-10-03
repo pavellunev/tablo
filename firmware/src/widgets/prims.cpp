@@ -1,6 +1,7 @@
 // Перенос анонимного namespace layout.cpp — пиксели не меняются, это
 // перемещение функций, не переписывание (см. .claude/plans/constructor.md).
 #include "prims.h"
+#include "../i18n.h"
 
 #include <cstdio>
 #include <string>
@@ -37,8 +38,9 @@ String format_delta(float delta_pct) {
     const char* arrow = delta_pct >= 0 ? "▲" : "▼";
     float magnitude = delta_pct >= 0 ? delta_pct : -delta_pct;
     std::snprintf(buf, sizeof(buf), "%s%.2f%%", arrow, static_cast<double>(magnitude));
+    const char point = i18n::lang() == i18n::Lang::kRu ? ',' : '.';
     for (char* p = buf; *p; ++p) {
-        if (*p == '.') *p = ',';
+        if (*p == '.') *p = point;
     }
     return String(buf);
 }
@@ -47,7 +49,7 @@ String format_delta_per_hour(float delta_per_hour) {
     char buf[24];
     const char* arrow = delta_per_hour >= 0 ? "▲" : "▼";
     float magnitude = delta_per_hour >= 0 ? delta_per_hour : -delta_per_hour;
-    std::snprintf(buf, sizeof(buf), "%s%.0f/ч", arrow, static_cast<double>(magnitude));
+    std::snprintf(buf, sizeof(buf), i18n::tr(i18n::Str::kPerHourFmt), arrow, static_cast<double>(magnitude));
     return String(buf);
 }
 
@@ -312,7 +314,7 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     uint8_t n = build_spark(*s, spark, static_cast<uint8_t>(Slot::kHistoryCapacity + 1));
     bool alarm = is_alarm(s->number);
     bool quiet = !alarm && is_quiet(s->number);
-    const char* state = alarm ? "ПРОВЕТРИТЬ" : (quiet ? "СВЕЖО" : "НОРМА");
+    const char* state = alarm ? i18n::tr(i18n::Str::kVentilate) : (quiet ? i18n::tr(i18n::Str::kFresh) : i18n::tr(i18n::Str::kNormal));
     // График не доходит до правого края: там стоит бейдж состояния, и линия
     // проходила прямо по нему — на живой панели «НОРМА» читалась сквозь
     // штрих. Ширина бейджа известна заранее: текст плюс 6px полей с каждой
@@ -364,7 +366,7 @@ void draw_reason_block(Canvas& c, Rect r, const char* eyebrow, const char* reaso
     // По контракту сюда приходят только с причиной (visible() без неё не
     // пускает), но nullptr в truncate_to_width — падение всего кадра, а не
     // одного блока; страхуемся текстом, а не молчанием.
-    if (reason == nullptr) reason = "нет данных";
+    if (reason == nullptr) reason = i18n::tr(i18n::Str::kNoData);
     draw_eyebrow(c, r, eyebrow);
     const int16_t baseline = static_cast<int16_t>(r.y + kEyebrowTextOffset + 30);
     String fitted = truncate_to_width(fonts::Terminus14, reason, r.w);
@@ -410,7 +412,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
         // «· ОСТАТОК» — явное указание, что число в шкале ниже показывает
         // ОСТАТОК, а не использование (задача: слот теперь несёт
         // remaining_percent(), не utilization — connectors.cpp).
-        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "ЛИМИТЫ · ОСТАТОК");
+        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, i18n::tr(i18n::Str::kLimitsRemaining));
         int16_t cursor = static_cast<int16_t>(y + kEyebrowTextOffset);
 
         if (claude_error) {
@@ -426,10 +428,10 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 13);
             int16_t half = static_cast<int16_t>((r.w - 20) / 2);
-            draw_limit_row(c, Rect{r.x, bar_y, half, 14}, "5 Ч", claude_5h, d.now, 10);
+            draw_limit_row(c, Rect{r.x, bar_y, half, 14}, i18n::tr(i18n::Str::kFiveHours), claude_5h, d.now, 10);
             c.vline(static_cast<int16_t>(r.x + half + 10), bar_y, 14, Color::Black);
             draw_limit_row(c, Rect{static_cast<int16_t>(r.x + half + 20), bar_y, half, 14},
-                           "НЕДЕЛЯ", claude_week, d.now, 10);
+                           i18n::tr(i18n::Str::kWeek), claude_week, d.now, 10);
             cursor = static_cast<int16_t>(bar_y + 14);
         }
 
@@ -473,9 +475,9 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
 
     if (air_error) {
         draw_reason_block(c, Rect{r.x, y, r.w, static_cast<int16_t>(r.y + r.h - y)},
-                          "КАБИНЕТ · ВОЗДУХ", air_error);
+                          i18n::tr(i18n::Str::kOfficeAir), air_error);
     } else if (has_air) {
-        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, "КАБИНЕТ · ВОЗДУХ");
+        draw_eyebrow(c, Rect{r.x, y, r.w, 0}, i18n::tr(i18n::Str::kOfficeAir));
         // 26, не 20: у PlexMono28 (значение CO₂/TVOC) выносные части поднимают
         // верхний край чернил заметно выше базовой линии, чем у прежнего
         // Terminus24 — с прежним отступом строка значения почти касалась

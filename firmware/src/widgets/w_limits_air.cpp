@@ -39,7 +39,7 @@ void limits_air_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r,
 }  // namespace
 
 extern const Spec kLimitsAirSpec = {
-    "limits_air", "Лимиты + Воздух", Size::kFlex, 202, kLimitsAirSlots,
+    "limits_air", "Limits + Air", Size::kFlex, 202, kLimitsAirSlots,
     300,           &limits_air_visible, &limits_air_draw,
 };
 

@@ -27,13 +27,14 @@
 #include "../../src/widgets/w_text.cpp"
 #include "../../src/widgets/registry.cpp"
 #include "../../src/layout.cpp"
+#include "../../src/i18n.cpp"
 #include "../../src/slots.cpp"
 
 using namespace layout;
 using slots::Slot;
 using slots::Store;
 
-void setUp() {}
+void setUp() { i18n::set_lang(i18n::Lang::kEn); }
 void tearDown() {}
 
 // ── wifi_bars ──
@@ -167,7 +168,7 @@ static void test_format_value_fresh_decimals_and_suffix() {
     s.at = 990;
     s.ttl = 60;
     s.number = 96.4f;
-    TEST_ASSERT_EQUAL_STRING("96,40", format_value(&s, 1000, 2, "").c_str());
+    TEST_ASSERT_EQUAL_STRING("96.40", format_value(&s, 1000, 2, "").c_str());
 }
 
 static void test_format_value_stale_gets_approx_mark() {
@@ -700,7 +701,16 @@ void test_four_digits_stay_together(void) {
 }
 
 void test_decimals_survive_grouping(void) {
+    TEST_ASSERT_EQUAL_STRING("104.80", layout::format_decimal(104.8f, 2).c_str());
+}
+
+// Десятичный разделитель следует языку экрана: ru — запятая, en — точка.
+void test_decimal_separator_follows_lang(void) {
+    i18n::set_lang(i18n::Lang::kRu);
     TEST_ASSERT_EQUAL_STRING("104,80", layout::format_decimal(104.8f, 2).c_str());
+    TEST_ASSERT_EQUAL_STRING("64 200,5", layout::format_decimal(64200.5f, 1).c_str());
+    i18n::set_lang(i18n::Lang::kEn);
+    TEST_ASSERT_EQUAL_STRING("64 200.5", layout::format_decimal(64200.5f, 1).c_str());
 }
 
 void test_millions_get_two_spaces(void) {
@@ -826,6 +836,7 @@ int main() {
     RUN_TEST(test_thousands_get_a_space);
     RUN_TEST(test_four_digits_stay_together);
     RUN_TEST(test_decimals_survive_grouping);
+    RUN_TEST(test_decimal_separator_follows_lang);
     RUN_TEST(test_millions_get_two_spaces);
     RUN_TEST(test_negative_keeps_sign_next_to_digits);
 

@@ -31,10 +31,11 @@
 #include "../../src/widgets/registry.cpp"
 #include "../../src/layout.cpp"
 #include "../../src/widgets/demand.cpp"
+#include "../../src/i18n.cpp"
 #include "../../src/slots.cpp"
 #include "../../src/connectors.cpp"
 
-void setUp() {}
+void setUp() { i18n::set_lang(i18n::Lang::kEn); }
 void tearDown() {}
 
 // ── slots::Slot::fresh / stale ──
@@ -629,7 +630,7 @@ static void test_format_mail_time_yesterday() {
     uint32_t mail_at;
     connectors::parse_iso8601_utc("2026-09-20T12:00:00Z", mail_at);
     String out = connectors::format_mail_time(mail_at, now, 0);
-    TEST_ASSERT_EQUAL_STRING("Вчера", out.c_str());
+    TEST_ASSERT_EQUAL_STRING("yesterday", out.c_str());
 }
 
 static void test_format_mail_time_older_is_day_dot_month() {
@@ -703,19 +704,19 @@ static void test_parse_claude_reset_times_missing_five_hour_fails() {
 static void test_format_claude_reset_both_windows() {
     uint32_t now, five_reset, week_reset;
     connectors::parse_iso8601_utc("2026-09-20T00:00:00Z", now);
-    // +3ч6мин -> "3:06"; +2дн22ч -> "2 дн 22 ч".
+    // +3ч6мин -> "3:06"; +2дн22ч -> "2d 22h".
     five_reset = now + 3 * 3600 + 6 * 60;
     week_reset = now + 2 * 86400 + 22 * 3600;
 
     String out = connectors::format_claude_reset(five_reset, true, week_reset, true, now);
-    TEST_ASSERT_EQUAL_STRING("5 ч через 3:06 · неделя через 2 дн 22 ч", out.c_str());
+    TEST_ASSERT_EQUAL_STRING("5h in 3:06 · week in 2d 22h", out.c_str());
 }
 
 static void test_format_claude_reset_only_five_hour() {
     uint32_t now = 1000;
     uint32_t five_reset = now + 3661;  // 1:01
     String out = connectors::format_claude_reset(five_reset, true, 0, false, now);
-    TEST_ASSERT_EQUAL_STRING("5 ч через 1:01", out.c_str());
+    TEST_ASSERT_EQUAL_STRING("5h in 1:01", out.c_str());
 }
 
 static void test_format_claude_reset_neither_window_is_empty() {
@@ -747,7 +748,7 @@ static void test_parse_codex_reset_missing_window_fails() {
 }
 
 static void test_format_codex_reset_matches_reference_shape() {
-    // Подобрано так, чтобы одновременно совпало и «через 2 дн 21 ч» (69 полных
+    // Подобрано так, чтобы одновременно совпало и «in 2d 21h» (69 полных
     // часов до сброса), и локальное время сброса 13:01 при смещении +05:00
     // (300 минут): reset-now=250000с -> 69ч (2дн21ч, минуты отбрасываются
     // форматированием), reset+18000с (локальное смещение) -> 306060с от
@@ -755,23 +756,54 @@ static void test_format_codex_reset_matches_reference_shape() {
     uint32_t now = 38060;
     uint32_t reset = 288060;
     String out = connectors::format_codex_reset(reset, now, 300);
+    TEST_ASSERT_EQUAL_STRING("week · reset 13:01 · in 2d 21h", out.c_str());
+}
+
+static void test_format_codex_reset_ru() {
+    i18n::set_lang(i18n::Lang::kRu);
+    String out = connectors::format_codex_reset(288060, 38060, 300);
     TEST_ASSERT_EQUAL_STRING("неделя · сброс 13:01 · через 2 дн 21 ч", out.c_str());
 }
 
 // ── connectors::wmo_to_text ──
 
-static void test_wmo_to_text_clear() { TEST_ASSERT_EQUAL_STRING("ЯСНО", connectors::wmo_to_text(0)); }
+static void test_wmo_to_text_clear() { TEST_ASSERT_EQUAL_STRING("CLEAR", connectors::wmo_to_text(0)); }
+
+static void test_wmo_to_text_clear_ru() {
+    i18n::set_lang(i18n::Lang::kRu);
+    TEST_ASSERT_EQUAL_STRING("ЯСНО", connectors::wmo_to_text(0));
+}
 
 static void test_wmo_to_text_rain() {
-    TEST_ASSERT_EQUAL_STRING("ДОЖДЬ", connectors::wmo_to_text(61));
+    TEST_ASSERT_EQUAL_STRING("RAIN", connectors::wmo_to_text(61));
 }
 
 static void test_wmo_to_text_thunderstorm() {
-    TEST_ASSERT_EQUAL_STRING("ГРОЗА", connectors::wmo_to_text(95));
+    TEST_ASSERT_EQUAL_STRING("STORM", connectors::wmo_to_text(95));
 }
 
 static void test_wmo_to_text_unknown_code() {
     TEST_ASSERT_EQUAL_STRING("?", connectors::wmo_to_text(-1));
+}
+
+// Таблицы kEn/kRu объявлены с размером Str::kCount: лишний элемент не
+// скомпилируется, а недостающий молча станет nullptr — ловим здесь.
+static void test_i18n_tables_complete() {
+    for (int lang = 0; lang < 2; ++lang) {
+        i18n::set_lang(lang == 0 ? i18n::Lang::kEn : i18n::Lang::kRu);
+        for (int i = 0; i < static_cast<int>(i18n::Str::kCount); ++i) {
+            const char* s = i18n::tr(static_cast<i18n::Str>(i));
+            TEST_ASSERT_NOT_NULL(s);
+            TEST_ASSERT_TRUE(s[0] != '\0');
+        }
+        for (int d = 0; d < 7; ++d) TEST_ASSERT_TRUE(i18n::weekday(d)[0] != '\0');
+        for (int m = 0; m < 12; ++m) TEST_ASSERT_TRUE(i18n::month(m)[0] != '\0');
+    }
+    TEST_ASSERT_EQUAL(static_cast<int>(i18n::Lang::kRu), static_cast<int>(i18n::from_code("ru")));
+    TEST_ASSERT_EQUAL(static_cast<int>(i18n::Lang::kEn), static_cast<int>(i18n::from_code("xx")));
+    TEST_ASSERT_EQUAL(static_cast<int>(i18n::Lang::kEn), static_cast<int>(i18n::from_code(nullptr)));
+    TEST_ASSERT_EQUAL_STRING("", i18n::weekday(7));
+    TEST_ASSERT_EQUAL_STRING("", i18n::month(12));
 }
 
 // ── connectors::parse_geocode_response ──
@@ -1397,11 +1429,14 @@ int main() {
     RUN_TEST(test_parse_codex_reset_falls_back_to_reset_after_seconds);
     RUN_TEST(test_parse_codex_reset_missing_window_fails);
     RUN_TEST(test_format_codex_reset_matches_reference_shape);
+    RUN_TEST(test_format_codex_reset_ru);
 
     RUN_TEST(test_wmo_to_text_clear);
+    RUN_TEST(test_wmo_to_text_clear_ru);
     RUN_TEST(test_wmo_to_text_rain);
     RUN_TEST(test_wmo_to_text_thunderstorm);
     RUN_TEST(test_wmo_to_text_unknown_code);
+    RUN_TEST(test_i18n_tables_complete);
 
     RUN_TEST(test_parse_geocode_response_reads_first_result);
     RUN_TEST(test_parse_geocode_response_empty_results_fails);

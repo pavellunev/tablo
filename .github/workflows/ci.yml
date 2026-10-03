@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+      - run: pip install platformio
+      - name: Build firmware
+        run: pio run -e xiao-esp32s3
+      - name: Host tests
+        run: pio test -e native
+      - name: Build settings page image
+        run: pio run -e xiao-esp32s3 -t buildfs
+
+  frames:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-frames-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+      - run: sudo apt-get update && sudo apt-get install -y g++
+      - run: pip install platformio pillow numpy
+      # build_and_run.sh берёт ArduinoJson и QRCode из .pio/libdeps/native.
+      - name: Install native libraries
+        run: pio pkg install -e native
+      - name: Render frames
+        run: tools/render_frame/build_and_run.sh
+      - name: Check frame skeleton
+        run: python3 tools/compare_frame.py tools/render_frame/out/full.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frames
+          path: tools/render_frame/out/*.png
+          if-no-files-found: warn

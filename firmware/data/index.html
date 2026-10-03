@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>tablo — настройка</title>
+<title>tablo — setup</title>
 <style>
   :root {
     color-scheme: light;
@@ -234,69 +234,328 @@
 <body>
 <header>
   <h1>tablo</h1>
-  <p>настройка устройства</p>
+  <p data-i18n="header.sub">Device setup</p>
 </header>
 
 <main>
 
   <section id="wifi-section">
-    <h2>Сеть</h2>
-    <div id="saved-networks"><p class="empty">сохранённых сетей нет</p></div>
-    <button type="button" class="secondary full" id="scan-btn">Сканировать сети</button>
+    <h2 data-i18n="section.network">Network</h2>
+    <div id="saved-networks"><p class="empty" data-i18n="net.none">No saved networks</p></div>
+    <button type="button" class="secondary full" id="scan-btn" data-i18n="net.scan">Scan networks</button>
     <div id="scan-list"></div>
     <div id="add-network-form" hidden>
       <label id="add-ssid-label"></label>
-      <input id="add-password" type="password" placeholder="Пароль сети">
+      <input id="add-password" type="password" placeholder="Network password" data-i18n-placeholder="net.password.ph">
       <div class="actions">
-        <button type="button" id="add-network-confirm">Добавить</button>
-        <button type="button" class="secondary" id="add-network-cancel">Отмена</button>
+        <button type="button" id="add-network-confirm" data-i18n="btn.add">Add</button>
+        <button type="button" class="secondary" id="add-network-cancel" data-i18n="btn.cancel">Cancel</button>
       </div>
     </div>
   </section>
 
   <section id="dashboards-section">
-    <h2>Экраны</h2>
+    <h2 data-i18n="section.screens">Screens</h2>
     <div class="canvas-wrap"><canvas id="preview-canvas" width="800" height="480"></canvas></div>
-    <div id="dashboards-box"><p class="empty">загрузка…</p></div>
+    <div id="dashboards-box"><p class="empty" data-i18n="loading">Loading…</p></div>
   </section>
 
   <section id="sources-section">
-    <h2>Источники</h2>
+    <h2 data-i18n="section.sources">Sources</h2>
     <div id="sources-list"></div>
     <details>
-      <summary>дополнительно</summary>
+      <summary data-i18n="sources.more">Advanced</summary>
       <div id="custom-connectors"></div>
-      <button type="button" class="secondary full" id="add-custom-connector">+ добавить источник</button>
+      <button type="button" class="secondary full" id="add-custom-connector" data-i18n="sources.addCustom">+ Add source</button>
     </details>
   </section>
 
   <section id="device-section">
-    <h2>Устройство</h2>
-    <label>Имя устройства
+    <h2 data-i18n="section.device">Device</h2>
+    <label><span data-i18n="device.name">Device name</span>
       <input id="device-name" type="text" placeholder="tablo-setup">
     </label>
     <p class="empty" id="device-name-hint"></p>
+    <label><span data-i18n="device.lang">Language</span>
+      <select id="lang">
+        <option value="en">English</option>
+        <option value="ru">&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</option>
+      </select>
+    </label>
   </section>
 
 </main>
 
 <p id="status"></p>
 <footer>
-  <button type="button" id="save-btn" disabled>Сохранить</button>
-  <button type="button" class="secondary" id="reboot-btn">Перезагрузить</button>
+  <button type="button" id="save-btn" data-i18n="save" disabled>Save</button>
+  <button type="button" class="secondary" id="reboot-btn" data-i18n="reboot">Reboot</button>
 </footer>
 
 <script>
 'use strict';
 
+// Тексты страницы. en — язык по умолчанию и запасной: ключа нет в ru — берётся en.
+// Пользовательские данные (имена экранов, подписи, сети, город) не переводятся.
+var I18N = {
+  en: {
+    'title': 'tablo — setup',
+    'header.sub': 'Device setup',
+    'section.network': 'Network',
+    'section.screens': 'Screens',
+    'section.sources': 'Sources',
+    'section.device': 'Device',
+    'btn.add': 'Add',
+    'btn.cancel': 'Cancel',
+    'save': 'Save',
+    'reboot': 'Reboot',
+    'loading': 'Loading…',
+    'net.none': 'No saved networks',
+    'net.scan': 'Scan networks',
+    'net.password.ph': 'Network password',
+    'net.passwordFor': 'Password for “{0}”',
+    'net.newPassword': 'New password',
+    'net.saved': 'Password saved',
+    'net.open': 'Open network',
+    'scan.none': 'No networks found',
+    'scan.pick': 'Select',
+    'scan.scanning': 'Scanning…',
+    'scan.failed': 'Scan failed: {0}',
+    'sources.more': 'Advanced',
+    'sources.addCustom': '+ Add source',
+    'device.name': 'Device name',
+    'device.lang': 'Language',
+    'hint.device.url': 'The page is available at http://{0}.local/ from the same network',
+    'hint.city.pending': 'Coordinates will be resolved once connected to a network',
+    'hint.city.coords': 'Coordinates: {0}, {1}',
+    'token.set': 'Set · leave empty to keep',
+    'token.unset': 'Not set',
+    'status.none': 'No data yet',
+    'status.updated': 'Updated {0} min ago',
+    'status.loadFailed': 'Couldn\'t load settings: {0} — reload the page',
+    'status.notLoaded': 'Settings not loaded yet — reload the page',
+    'status.saving': 'Saving…',
+    'status.saved': 'Saved',
+    'status.saveFailed': 'Couldn\'t save: {0}',
+    'status.rebooting': 'Rebooting…',
+    'reboot.confirm': 'Reboot the device?',
+    'slot.btc': 'BTC rate',
+    'slot.usd_rub': 'US dollar',
+    'slot.eur_rub': 'Euro',
+    'slot.co2': 'CO₂',
+    'slot.tvoc': 'TVOC',
+    'slot.weather.temp': 'Temperature',
+    'slot.limit.claude.5h': 'Claude, 5 hours',
+    'slot.limit.claude.week': 'Claude, week',
+    'slot.limit.codex': 'GPT',
+    'slot.mail.unread': 'Unread emails',
+    'slot.placeholder': '— Slot —',
+    'size.flex': 'Flexible',
+    'widget.markets': 'Markets',
+    'widget.limits': 'Limits',
+    'widget.air': 'Air quality',
+    'widget.limits_air': 'Limits and air',
+    'widget.mail': 'Mail',
+    'widget.today': 'Today',
+    'widget.metric': 'Metric',
+    'widget.text': 'Text',
+    'widget.divider': 'Line on the left',
+    'widget.label.ph': 'Label',
+    'widget.text.ph': 'Text',
+    'widget.otherRow': '→ To other row',
+    'widget.none': 'No widgets',
+    'widget.add': '+ Widget',
+    'wsrc.ok': 'Source configured',
+    'wsrc.need': 'Source needed: {0}',
+    'palette.add': 'Add',
+    'palette.close': 'Close',
+    'palette.unavailable': 'Widget catalog unavailable: update the firmware',
+    'palette.pickSlot': 'Choose a slot for the metric',
+    'dash.unsupported': 'Firmware has no screens support',
+    'dash.defaultName': 'Screen {0}',
+    'dash.name': 'Screen name',
+    'dash.active': 'Active screen (switched with the board buttons)',
+    'dash.row.top': 'Top row',
+    'dash.row.bottom': 'Bottom row',
+    'preview.unnamed': 'Untitled',
+    'preview.nodata': 'No data',
+    'card.claude.title': 'Claude',
+    'card.codex.title': 'Codex',
+    'card.mail.title': 'Mail',
+    'card.home.title': 'Smart home',
+    'card.rates.title': 'Rates',
+    'card.weather.title': 'Weather and time zone',
+    'field.accessToken': 'Access token',
+    'field.refreshToken': 'Refresh token',
+    'field.token': 'Token',
+    'field.url': 'Address',
+    'field.insecure': 'Skip certificate check (https)',
+    'hint.changed.token': 'Address changed — enter the token again, or it won\'t be saved',
+    'card.claude.hint': 'On Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → fields <code>claudeAiOauth.accessToken</code> and <code>.refreshToken</code>. The refresh token shared with the CLI gets rotated — see docs/decisions.md, item 2.',
+    'card.codex.hint': 'Source: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> and <code>tokens.refresh_token</code>. ' +
+      'With a refresh token the device renews the pair by itself. Better to use a separate login for the device, so the pair isn\'t shared with Codex CLI: ' +
+      '<code>CODEX_HOME=~/.codex-tablo codex login</code>, then take the tokens from <code>~/.codex-tablo/auth.json</code>.',
+    'mail.server': 'IMAP server',
+    'mail.changed': 'Server changed — enter the mailbox address and password again, or they won\'t be saved',
+    'mail.address': 'Mailbox address',
+    'mail.password': 'App password',
+    'mail.hint': 'Gmail: use an app password, not your account password.',
+    'home.hint': 'A long-lived token from your Home Assistant user profile.',
+    'home.insecure.warn': 'Only for a self-signed certificate on your home server. Without the check, the token can be intercepted on someone else\'s network — see docs/decisions.md, item 9.',
+    'home.sensors': 'Sensors:',
+    'home.addSensor': '+ Sensor',
+    'home.customSlot': 'Custom slot…',
+    'home.customSlot.ph': 'Custom slot',
+    'rates.hint': 'Public APIs with no key — nothing to configure.',
+    'weather.city': 'City',
+    'weather.city.ph': 'Berlin',
+    'custom.none': 'No additional sources',
+    'custom.id': 'Identifier',
+    'custom.interval': 'Interval, s',
+    'custom.map': 'Slot mapping:',
+    'custom.path.ph': 'JSON path',
+    'custom.addRow': '+ Row',
+    'custom.remove': 'Remove source'
+  },
+  ru: {
+    'title': 'tablo — настройка',
+    'header.sub': 'настройка устройства',
+    'section.network': 'Сеть',
+    'section.screens': 'Экраны',
+    'section.sources': 'Источники',
+    'section.device': 'Устройство',
+    'btn.add': 'Добавить',
+    'btn.cancel': 'Отмена',
+    'save': 'Сохранить',
+    'reboot': 'Перезагрузить',
+    'loading': 'загрузка…',
+    'net.none': 'сохранённых сетей нет',
+    'net.scan': 'Сканировать сети',
+    'net.password.ph': 'Пароль сети',
+    'net.passwordFor': 'Пароль для «{0}»',
+    'net.newPassword': 'новый пароль',
+    'net.saved': 'пароль сохранён',
+    'net.open': 'открытая сеть',
+    'scan.none': 'сети не найдены',
+    'scan.pick': 'выбрать',
+    'scan.scanning': 'сканируем…',
+    'scan.failed': 'сканирование не удалось: {0}',
+    'sources.more': 'дополнительно',
+    'sources.addCustom': '+ добавить источник',
+    'device.name': 'Имя устройства',
+    'device.lang': 'Язык',
+    'hint.device.url': 'страница доступна как http://{0}.local/ из той же сети',
+    'hint.city.pending': 'координаты определятся при подключении к сети',
+    'hint.city.coords': 'координаты: {0}, {1}',
+    'token.set': 'задан · оставьте пустым, чтобы не менять',
+    'token.unset': 'не задан',
+    'status.none': 'данных ещё нет',
+    'status.updated': 'обновлено {0} мин назад',
+    'status.loadFailed': 'не удалось загрузить настройки: {0} — обновите страницу',
+    'status.notLoaded': 'настройки ещё не загружены — обновите страницу',
+    'status.saving': 'сохраняем…',
+    'status.saved': 'сохранено',
+    'status.saveFailed': 'не сохранилось: {0}',
+    'status.rebooting': 'перезагружаем…',
+    'reboot.confirm': 'Перезагрузить устройство?',
+    'slot.btc': 'Курс BTC',
+    'slot.usd_rub': 'Доллар',
+    'slot.eur_rub': 'Евро',
+    'slot.co2': 'CO₂',
+    'slot.tvoc': 'TVOC',
+    'slot.weather.temp': 'Температура',
+    'slot.limit.claude.5h': 'Claude, 5 часов',
+    'slot.limit.claude.week': 'Claude, неделя',
+    'slot.limit.codex': 'GPT',
+    'slot.mail.unread': 'Непрочитанных писем',
+    'slot.placeholder': '— слот —',
+    'size.flex': 'гибкий',
+    'widget.markets': 'Курсы',
+    'widget.limits': 'Лимиты',
+    'widget.air': 'Воздух',
+    'widget.limits_air': 'Лимиты и воздух',
+    'widget.mail': 'Почта',
+    'widget.today': 'Сегодня',
+    'widget.metric': 'Показатель',
+    'widget.text': 'Текст',
+    'widget.divider': 'линия слева',
+    'widget.label.ph': 'подпись',
+    'widget.text.ph': 'текст',
+    'widget.otherRow': '→ в другой ряд',
+    'widget.none': 'виджетов нет',
+    'widget.add': '+ виджет',
+    'wsrc.ok': 'источник настроен',
+    'wsrc.need': 'нужен источник: {0}',
+    'palette.add': 'добавить',
+    'palette.close': 'закрыть',
+    'palette.unavailable': 'каталог виджетов недоступен: обновите прошивку',
+    'palette.pickSlot': 'выберите слот для показателя',
+    'dash.unsupported': 'прошивка без поддержки экранов',
+    'dash.defaultName': 'Экран {0}',
+    'dash.name': 'Имя экрана',
+    'dash.active': 'Активный экран (переключается кнопками на плате)',
+    'dash.row.top': 'Верхний ряд',
+    'dash.row.bottom': 'Нижний ряд',
+    'preview.unnamed': 'без имени',
+    'preview.nodata': 'нет данных',
+    'card.claude.title': 'Claude',
+    'card.codex.title': 'Codex',
+    'card.mail.title': 'Почта',
+    'card.home.title': 'Умный дом',
+    'card.rates.title': 'Курсы',
+    'card.weather.title': 'Погода и часовой пояс',
+    'field.accessToken': 'Access token',
+    'field.refreshToken': 'Refresh token',
+    'field.token': 'Токен',
+    'field.url': 'Адрес',
+    'field.insecure': 'Не проверять сертификат (https)',
+    'hint.changed.token': 'адрес изменился — введите токен заново, иначе он не сохранится',
+    'card.claude.hint': 'На Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → поля <code>claudeAiOauth.accessToken</code> и <code>.refreshToken</code>. Общий refresh-токен с CLI ротируется — см. docs/decisions.md, п.2.',
+    'card.codex.hint': 'Источник: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> и <code>tokens.refresh_token</code>. ' +
+      'С refresh-токеном устройство обновляет пару само. Лучше отдельный вход для устройства, чтобы не делить пару с Codex CLI: ' +
+      '<code>CODEX_HOME=~/.codex-tablo codex login</code>, затем токены из <code>~/.codex-tablo/auth.json</code>.',
+    'mail.server': 'Сервер IMAP',
+    'mail.changed': 'сервер изменился — введите адрес ящика и пароль заново, иначе они не сохранятся',
+    'mail.address': 'Адрес ящика',
+    'mail.password': 'Пароль приложения',
+    'mail.hint': 'Gmail: используйте пароль приложения, не пароль аккаунта.',
+    'home.hint': 'Долгоживущий токен — из профиля пользователя Home Assistant.',
+    'home.insecure.warn': 'Только для самоподписанного сертификата домашнего сервера. Без проверки токен могут перехватить в чужой сети — см. docs/decisions.md, п.9.',
+    'home.sensors': 'Датчики:',
+    'home.addSensor': '+ датчик',
+    'home.customSlot': 'свой слот…',
+    'home.customSlot.ph': 'свой слот',
+    'rates.hint': 'Публичные API без ключа — настраивать нечего.',
+    'weather.city': 'Город',
+    'weather.city.ph': 'Екатеринбург',
+    'custom.none': 'дополнительных источников нет',
+    'custom.id': 'Идентификатор',
+    'custom.interval': 'Период, с',
+    'custom.map': 'Привязка слотов:',
+    'custom.path.ph': 'путь в JSON',
+    'custom.addRow': '+ строка',
+    'custom.remove': 'Удалить источник'
+  }
+};
+
+// Подстановка {0}, {1}; нет ключа в текущем языке — en, нет и там — сам ключ.
+function t(key) {
+  var s = (I18N[state.lang] || {})[key];
+  if (s === undefined) s = I18N.en[key];
+  if (s === undefined) s = key;
+  var args = arguments;
+  return s.replace(/\{(\d+)\}/g, function (m, i) {
+    return args[Number(i) + 1] !== undefined ? args[Number(i) + 1] : m;
+  });
+}
+
 // Известные слоты — то, что реально умеет показывать кадр устройства.
 // Используются и в мастере добавления показателя (metric), и в ручной
 // привязке датчиков/своих источников.
+// Подписи — t('slot.' + slot) в момент рендера, чтобы смена языка их обновляла.
 var SLOTS = [
-  ['btc', 'Курс BTC'], ['usd_rub', 'Доллар'], ['eur_rub', 'Евро'],
-  ['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура'],
-  ['limit.claude.5h', 'Claude, 5 часов'], ['limit.claude.week', 'Claude, неделя'],
-  ['limit.codex', 'GPT'], ['mail.unread', 'Непрочитанных писем']
+  'btc', 'usd_rub', 'eur_rub', 'co2', 'tvoc', 'weather.temp',
+  'limit.claude.5h', 'limit.claude.week', 'limit.codex', 'mail.unread'
 ];
 
 // Заводские коннекторы: id/kind фиксированы прошивкой (config.cpp,
@@ -318,15 +577,17 @@ function isFactoryId(id) { return !!FACTORY_IDS[id]; }
 // карточка, по какому слоту показывать «обновлено N мин назад», и всегда ли
 // она считается настроенной (Курсы и Погода — публичные API без ключа).
 var SOURCE_CARDS = [
-  { key: 'claude', title: 'Claude', connIds: ['claude'], firstSlot: 'limit.claude.5h', always: false },
-  { key: 'codex', title: 'Codex', connIds: ['codex'], firstSlot: 'limit.codex', always: false },
-  { key: 'mail', title: 'Почта', connIds: ['mail'], firstSlot: 'mail.unread', always: false },
-  { key: 'home', title: 'Умный дом', connIds: ['home'], firstSlot: 'co2', always: false },
-  { key: 'rates', title: 'Курсы', connIds: ['btc', 'btc_history', 'fiat'], firstSlot: 'btc', always: true },
-  { key: 'weather', title: 'Погода и часовой пояс', connIds: ['weather', 'geocode'], firstSlot: 'weather.temp', always: true }
+  { key: 'claude', titleKey: 'card.claude.title', connIds: ['claude'], firstSlot: 'limit.claude.5h', always: false },
+  { key: 'codex', titleKey: 'card.codex.title', connIds: ['codex'], firstSlot: 'limit.codex', always: false },
+  { key: 'mail', titleKey: 'card.mail.title', connIds: ['mail'], firstSlot: 'mail.unread', always: false },
+  { key: 'home', titleKey: 'card.home.title', connIds: ['home'], firstSlot: 'co2', always: false },
+  { key: 'rates', titleKey: 'card.rates.title', connIds: ['btc', 'btc_history', 'fiat'], firstSlot: 'btc', always: true },
+  { key: 'weather', titleKey: 'card.weather.title', connIds: ['weather', 'geocode'], firstSlot: 'weather.temp', always: true }
 ];
 
 var state = {
+  lang: 'en',     // язык страницы и панели; приходит из /api/config, по умолчанию en
+  scanResults: null,
   loaded: false,  // /api/config прочитан успешно — только тогда «Сохранить» активна
   device_name: '', timezone_minutes: 0, city: '', city_resolved: '', city_lat: 0, city_lon: 0,
   networks: [], connectors: [], connectorOrig: {},
@@ -384,7 +645,7 @@ function ensureFactoryConnectors() {
 }
 
 function tokenPlaceholder(isSet) {
-  return isSet ? 'задан · оставьте пустым, чтобы не менять' : 'не задан';
+  return isSet ? t('token.set') : t('token.unset');
 }
 
 function sensorRole(slot) {
@@ -403,7 +664,7 @@ function sourceCardByKey(key) {
 }
 function cardTitleByKey(key) {
   var c = sourceCardByKey(key);
-  return c ? c.title : key;
+  return c ? t(c.titleKey) : key;
 }
 
 // Правило из плана: limit.claude*→Claude, limit.codex*→Codex, mail.*→Почта,
@@ -442,9 +703,9 @@ function computeSourceCardStatus(card) {
     if (s && s.error) return { error: true, text: s.error };
   }
   var fs = slotInfo(card.firstSlot);
-  if (!fs) return { error: false, text: 'данных ещё нет' };
+  if (!fs) return { error: false, text: t('status.none') };
   var mins = Math.max(0, Math.round((fs.age || 0) / 60));
-  return { error: false, text: 'обновлено ' + mins + ' мин назад' };
+  return { error: false, text: t('status.updated', mins) };
 }
 
 function statusLineHtml(key) {
@@ -482,22 +743,25 @@ function updateAllChangedHints() {
   state.connectors.forEach(function (c) { updateChangedHint(c.id); });
 }
 
+function cityHintText() {
+  if (state.city && state.city !== state.city_resolved) {
+    return t('hint.city.pending');
+  } else if (state.city_lat || state.city_lon) {
+    return t('hint.city.coords', state.city_lat.toFixed(4), state.city_lon.toFixed(4));
+  }
+  return '';
+}
+
 function updateCityHint() {
   var hintEl = document.getElementById('city-hint');
   if (!hintEl) return;
-  var text = '';
-  if (state.city && state.city !== state.city_resolved) {
-    text = 'координаты определятся при подключении к сети';
-  } else if (state.city_lat || state.city_lon) {
-    text = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
-  }
-  hintEl.textContent = text;
+  hintEl.textContent = cityHintText();
 }
 
 function updateDeviceNameHint(name) {
   var hintEl = document.getElementById('device-name-hint');
   if (!hintEl) return;
-  hintEl.textContent = 'страница доступна как http://' + (name || 'tablo-setup') + '.local/ из той же сети';
+  hintEl.textContent = t('hint.device.url', name || 'tablo-setup');
 }
 
 // ── Экраны: токены размеров, каталог виджетов, дашборды ──
@@ -513,24 +777,29 @@ function sizeOptionsHtml(minWidth, current) {
   var opts = [];
   if (minWidth <= 202) opts.push(['S', 'S (202 px)']);
   if (minWidth <= 296) opts.push(['M', 'M (296 px)']);
-  opts.push(['flex', 'гибкий']);
+  opts.push(['flex', t('size.flex')]);
   return opts.map(function (o) {
     return '<option value="' + o[0] + '"' + (o[0] === current ? ' selected' : '') + '>' + o[1] + '</option>';
   }).join('');
 }
 
 function slotOptionsHtml(current) {
-  var html = '<option value="">— слот —</option>';
+  var html = '<option value="">' + t('slot.placeholder') + '</option>';
   SLOTS.forEach(function (s) {
-    html += '<option value="' + s[0] + '"' + (s[0] === current ? ' selected' : '') + '>' + escapeHtml(s[1]) + '</option>';
+    html += '<option value="' + s + '"' + (s === current ? ' selected' : '') + '>' + escapeHtml(t('slot.' + s)) + '</option>';
   });
   return html;
 }
 
+// Заголовок типа виджета: свой перевод по type, иначе title из прошивки.
+function typeTitle(type, spec) {
+  if (I18N.en['widget.' + type] !== undefined) return t('widget.' + type);
+  return (spec && spec.title) || type;
+}
+
 function widgetTitle(inst) {
   if ((inst.type === 'metric' || inst.type === 'text') && inst.label) return inst.label;
-  var spec = state.widgetsByType[inst.type];
-  return spec ? spec.title : inst.type;
+  return typeTitle(inst.type, state.widgetsByType[inst.type]);
 }
 
 // Слоты, которые требует виджет: у metric — единственный выбранный слот, у
@@ -551,9 +820,9 @@ function computeWidgetSourceStatus(inst, spec) {
     if (!card || seen[card]) return;
     if (!isCardConfigured(card)) { seen[card] = true; missing.push(card); }
   });
-  if (missing.length === 0) return { configured: true, text: 'источник настроен' };
+  if (missing.length === 0) return { configured: true, text: t('wsrc.ok') };
   var titles = missing.map(function (k) { return cardTitleByKey(k); });
-  return { configured: false, text: 'нужен источник: ' + titles.join(', '), firstMissing: missing[0] };
+  return { configured: false, text: t('wsrc.need', titles.join(', ')), firstMissing: missing[0] };
 }
 
 function isInstanceConfigured(inst) {
@@ -601,7 +870,7 @@ function renderRow(dash, rowIndex) {
   var html = '<div class="widget-list">';
   row.forEach(function (inst, i) {
     var spec = state.widgetsByType[inst.type];
-    var title = spec ? spec.title : inst.type;
+    var title = typeTitle(inst.type, spec);
     var minWidth = spec ? spec.min_width : 0;
     var status = computeWidgetSourceStatus(inst, spec);
     html += '<div class="widget-item">';
@@ -609,22 +878,22 @@ function renderRow(dash, rowIndex) {
       '<button type="button" class="small danger" data-remove-widget data-row="' + rowIndex + '" data-idx="' + i + '">✕</button></div>';
     html += '<div class="widget-item-controls">' +
       '<select data-widget-field="size" data-row="' + rowIndex + '" data-idx="' + i + '">' + sizeOptionsHtml(minWidth, inst.size) + '</select>' +
-      '<label class="checkbox-row inline"><input type="checkbox" data-widget-field="divider" data-row="' + rowIndex + '" data-idx="' + i + '"' + (inst.divider ? ' checked' : '') + '><span>линия слева</span></label>' +
+      '<label class="checkbox-row inline"><input type="checkbox" data-widget-field="divider" data-row="' + rowIndex + '" data-idx="' + i + '"' + (inst.divider ? ' checked' : '') + '><span>' + t('widget.divider') + '</span></label>' +
       '</div>';
     if (inst.type === 'metric') {
       html += '<div class="widget-item-controls">' +
         '<select data-widget-field="slot" data-row="' + rowIndex + '" data-idx="' + i + '">' + slotOptionsHtml(inst.slot) + '</select>' +
-        '<input type="text" placeholder="подпись" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
+        '<input type="text" placeholder="' + t('widget.label.ph') + '" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
         '</div>';
     } else if (inst.type === 'text') {
       html += '<div class="widget-item-controls">' +
-        '<input type="text" placeholder="текст" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
+        '<input type="text" placeholder="' + t('widget.text.ph') + '" value="' + escapeAttr(inst.label) + '" data-widget-field="label" data-row="' + rowIndex + '" data-idx="' + i + '">' +
         '</div>';
     }
     html += '<div class="widget-item-move">' +
       '<button type="button" class="small secondary" data-move-widget="up" data-row="' + rowIndex + '" data-idx="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
       '<button type="button" class="small secondary" data-move-widget="down" data-row="' + rowIndex + '" data-idx="' + i + '"' + (i === row.length - 1 ? ' disabled' : '') + '>▼</button>' +
-      '<button type="button" class="small secondary" data-move-row data-row="' + rowIndex + '" data-idx="' + i + '">→ в другой ряд</button>' +
+      '<button type="button" class="small secondary" data-move-row data-row="' + rowIndex + '" data-idx="' + i + '">' + t('widget.otherRow') + '</button>' +
       '</div>';
     if (status) {
       html += '<p class="source-status ' + (status.configured ? 'ok' : 'missing') + '"' +
@@ -632,9 +901,9 @@ function renderRow(dash, rowIndex) {
     }
     html += '</div>';
   });
-  if (row.length === 0) html += '<p class="empty">виджетов нет</p>';
+  if (row.length === 0) html += '<p class="empty">' + t('widget.none') + '</p>';
   html += '</div>';
-  html += '<button type="button" class="secondary small" data-add-widget data-row="' + rowIndex + '">+ виджет</button>';
+  html += '<button type="button" class="secondary small" data-add-widget data-row="' + rowIndex + '">' + t('widget.add') + '</button>';
   return html;
 }
 
@@ -650,18 +919,18 @@ function renderPalette(rowIndex) {
     if (st.type === 'metric') {
       html += '<select id="palette-slot">' + slotOptionsHtml(st.slot) + '</select>';
     }
-    html += '<input type="text" id="palette-label" placeholder="подпись" value="' + escapeAttr(st.label) + '">';
-    html += '<div class="actions"><button type="button" id="palette-confirm">Добавить</button><button type="button" class="secondary" id="palette-cancel">Отмена</button></div>';
+    html += '<input type="text" id="palette-label" placeholder="' + t('widget.label.ph') + '" value="' + escapeAttr(st.label) + '">';
+    html += '<div class="actions"><button type="button" id="palette-confirm">' + t('btn.add') + '</button><button type="button" class="secondary" id="palette-cancel">' + t('btn.cancel') + '</button></div>';
     html += '</div>';
   } else if (state.widgetsCatalog.length === 0) {
-    html += '<p class="empty">каталог виджетов недоступен: обновите прошивку</p>';
+    html += '<p class="empty">' + t('palette.unavailable') + '</p>';
   } else {
     state.widgetsCatalog.forEach(function (w) {
-      html += '<div class="row"><span class="label">' + escapeHtml(w.title || w.type) + '</span>' +
-        '<button type="button" class="small" data-palette-add="' + w.type + '" data-row="' + rowIndex + '">добавить</button></div>';
+      html += '<div class="row"><span class="label">' + escapeHtml(typeTitle(w.type, w)) + '</span>' +
+        '<button type="button" class="small" data-palette-add="' + w.type + '" data-row="' + rowIndex + '">' + t('palette.add') + '</button></div>';
     });
   }
-  html += '<button type="button" class="secondary small full" data-palette-close>закрыть</button>';
+  html += '<button type="button" class="secondary small full" data-palette-close>' + t('palette.close') + '</button>';
   html += '</div>';
   return html;
 }
@@ -682,7 +951,7 @@ function confirmPaletteSubType() {
   var st = state.paletteSubType;
   if (!st) return;
   if (st.type === 'metric' && !st.slot) {
-    setStatus('выберите слот для показателя');
+    setStatus(t('palette.pickSlot'));
     return;
   }
   var spec = state.widgetsByType[st.type];
@@ -695,24 +964,24 @@ function confirmPaletteSubType() {
 function renderDashboards() {
   var box = el('dashboards-box');
   if (!state.dashboardsSupported) {
-    box.innerHTML = '<p class="empty">прошивка без поддержки экранов</p>';
+    box.innerHTML = '<p class="empty">' + t('dash.unsupported') + '</p>';
     drawPreview();
     return;
   }
   var tabsHtml = '<div class="tabs">';
   state.dashboards.forEach(function (d, i) {
     tabsHtml += '<button type="button" class="tab-btn' + (i === state.currentTab ? ' active' : '') + '" data-tab="' + i + '">' +
-      escapeHtml(d.name || ('Экран ' + (i + 1))) + '</button>';
+      escapeHtml(d.name || t('dash.defaultName', i + 1)) + '</button>';
   });
   tabsHtml += '</div>';
 
   var dash = state.dashboards[state.currentTab];
   var editorHtml = '';
-  editorHtml += '<label>Имя экрана<input type="text" id="dash-name" value="' + escapeAttr(dash.name) + '"></label>';
+  editorHtml += '<label>' + t('dash.name') + '<input type="text" id="dash-name" value="' + escapeAttr(dash.name) + '"></label>';
   editorHtml += '<label class="checkbox-row"><input type="radio" name="active-dashboard" id="dash-active-radio"' +
-    (state.activeDashboard === state.currentTab ? ' checked' : '') + '><span>Активный экран (переключается кнопками на плате)</span></label>';
-  editorHtml += '<div class="dash-row"><h4>Верхний ряд</h4>' + renderRow(dash, 0) + renderPalette(0) + '</div>';
-  editorHtml += '<div class="dash-row"><h4>Нижний ряд</h4>' + renderRow(dash, 1) + renderPalette(1) + '</div>';
+    (state.activeDashboard === state.currentTab ? ' checked' : '') + '><span>' + t('dash.active') + '</span></label>';
+  editorHtml += '<div class="dash-row"><h4>' + t('dash.row.top') + '</h4>' + renderRow(dash, 0) + renderPalette(0) + '</div>';
+  editorHtml += '<div class="dash-row"><h4>' + t('dash.row.bottom') + '</h4>' + renderRow(dash, 1) + renderPalette(1) + '</div>';
 
   box.innerHTML = tabsHtml + editorHtml;
   drawPreview();
@@ -803,7 +1072,7 @@ function drawPreview() {
   ctx.fillStyle = '#ffffff';
   ctx.font = '600 18px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
-  ctx.fillText(dash ? (dash.name || 'без имени') : 'нет данных', margin, headerH / 2);
+  ctx.fillText(dash ? (dash.name || t('preview.unnamed')) : t('preview.nodata'), margin, headerH / 2);
 
   if (!dash) return;
 
@@ -835,53 +1104,51 @@ function drawPreview() {
 
 function renderClaudeCard() {
   var c = conn('claude');
-  return '<div class="source-card" id="source-card-claude"><h3>Claude</h3>' + statusLineHtml('claude') +
-    '<label>Access token<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="claude"></label>' +
-    '<label>Refresh token<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="claude"></label>' +
-    '<p class="hint">На Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → поля <code>claudeAiOauth.accessToken</code> и <code>.refreshToken</code>. Общий refresh-токен с CLI ротируется — см. docs/decisions.md, п.2.</p>' +
+  return '<div class="source-card" id="source-card-claude"><h3>' + t('card.claude.title') + '</h3>' + statusLineHtml('claude') +
+    '<label>' + t('field.accessToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="claude"></label>' +
+    '<label>' + t('field.refreshToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="claude"></label>' +
+    '<p class="hint">' + t('card.claude.hint') + '</p>' +
     '</div>';
 }
 
 function renderCodexCard() {
   var c = conn('codex');
-  return '<div class="source-card" id="source-card-codex"><h3>Codex</h3>' + statusLineHtml('codex') +
-    '<label>Access token<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
-    '<label>Refresh token<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="codex"></label>' +
-    '<p class="hint">Источник: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> и <code>tokens.refresh_token</code>. ' +
-    'С refresh-токеном устройство обновляет пару само. Лучше отдельный вход для устройства, чтобы не делить пару с Codex CLI: ' +
-    '<code>CODEX_HOME=~/.codex-tablo codex login</code>, затем токены из <code>~/.codex-tablo/auth.json</code>.</p>' +
+  return '<div class="source-card" id="source-card-codex"><h3>' + t('card.codex.title') + '</h3>' + statusLineHtml('codex') +
+    '<label>' + t('field.accessToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
+    '<label>' + t('field.refreshToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="codex"></label>' +
+    '<p class="hint">' + t('card.codex.hint') + '</p>' +
     '</div>';
 }
 
 function renderMailCard() {
   var c = conn('mail');
-  return '<div class="source-card" id="source-card-mail"><h3>Почта</h3>' + statusLineHtml('mail') +
-    '<label>Сервер IMAP<input type="text" value="' + escapeAttr(c.url) + '" placeholder="imap.gmail.com" data-conn-field="url" data-conn-id="mail"></label>' +
-    '<p class="warning" id="hint-changed-mail" hidden>сервер изменился — введите адрес ящика и пароль заново, иначе они не сохранятся</p>' +
-    '<label>Адрес ящика<input type="text" placeholder="' + tokenPlaceholder(c.username_set) + '" data-conn-field="username" data-conn-id="mail"></label>' +
-    '<label>Пароль приложения<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="mail"></label>' +
-    '<p class="hint">Gmail: используйте пароль приложения, не пароль аккаунта.</p>' +
+  return '<div class="source-card" id="source-card-mail"><h3>' + t('card.mail.title') + '</h3>' + statusLineHtml('mail') +
+    '<label>' + t('mail.server') + '<input type="text" value="' + escapeAttr(c.url) + '" placeholder="imap.gmail.com" data-conn-field="url" data-conn-id="mail"></label>' +
+    '<p class="warning" id="hint-changed-mail" hidden>' + t('mail.changed') + '</p>' +
+    '<label>' + t('mail.address') + '<input type="text" placeholder="' + tokenPlaceholder(c.username_set) + '" data-conn-field="username" data-conn-id="mail"></label>' +
+    '<label>' + t('mail.password') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="mail"></label>' +
+    '<p class="hint">' + t('mail.hint') + '</p>' +
     '</div>';
 }
 
 function sensorSlotOptionsHtml() {
-  var opts = [['co2', 'CO₂'], ['tvoc', 'TVOC'], ['weather.temp', 'Температура']];
+  var opts = [['co2', t('slot.co2')], ['tvoc', t('slot.tvoc')], ['weather.temp', t('slot.weather.temp')]];
   var html = '';
   opts.forEach(function (o) { html += '<option value="' + o[0] + '">' + o[1] + '</option>'; });
-  html += '<option value="__custom">свой слот…</option>';
+  html += '<option value="__custom">' + t('home.customSlot') + '</option>';
   return html;
 }
 
 function renderHomeCard() {
   var c = conn('home');
-  var html = '<div class="source-card" id="source-card-home"><h3>Умный дом</h3>' + statusLineHtml('home') +
-    '<label>Адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-conn-field="url" data-conn-id="home"></label>' +
-    '<p class="warning" id="hint-changed-home" hidden>адрес изменился — введите токен заново, иначе он не сохранится</p>' +
-    '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="home"></label>' +
-    '<p class="hint">Долгоживущий токен — из профиля пользователя Home Assistant.</p>' +
+  var html = '<div class="source-card" id="source-card-home"><h3>' + t('card.home.title') + '</h3>' + statusLineHtml('home') +
+    '<label>' + t('field.url') + '<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-conn-field="url" data-conn-id="home"></label>' +
+    '<p class="warning" id="hint-changed-home" hidden>' + t('hint.changed.token') + '</p>' +
+    '<label>' + t('field.token') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="home"></label>' +
+    '<p class="hint">' + t('home.hint') + '</p>' +
     '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="home"' + (c.insecure ? ' checked' : '') + '>' +
-    '<span>Не проверять сертификат (https)<br><span class="warning">Только для самоподписанного сертификата домашнего сервера. Без проверки токен могут перехватить в чужой сети — см. docs/decisions.md, п.9.</span></span></div>' +
-    '<p class="hint">Датчики:</p>';
+    '<span>' + t('field.insecure') + '<br><span class="warning">' + t('home.insecure.warn') + '</span></span></div>' +
+    '<p class="hint">' + t('home.sensors') + '</p>';
   (c.map || []).forEach(function (m, mi) {
     html += '<div class="row"><span class="label">' + escapeHtml(sensorRole(m.slot)) + '</span>' +
       '<input type="text" style="flex:1;margin:0 8px" value="' + escapeAttr(m.source) + '" placeholder="entity_id" data-sensor-field="source" data-sensor-idx="' + mi + '">' +
@@ -890,31 +1157,25 @@ function renderHomeCard() {
   if (state.addSensorOpen) {
     html += '<div class="add-form">' +
       '<select id="add-sensor-slot">' + sensorSlotOptionsHtml() + '</select>' +
-      '<input type="text" id="add-sensor-custom" placeholder="свой слот" hidden>' +
-      '<div class="actions"><button type="button" id="add-sensor-confirm">Добавить</button><button type="button" class="secondary" id="add-sensor-cancel">Отмена</button></div>' +
+      '<input type="text" id="add-sensor-custom" placeholder="' + t('home.customSlot.ph') + '" hidden>' +
+      '<div class="actions"><button type="button" id="add-sensor-confirm">' + t('btn.add') + '</button><button type="button" class="secondary" id="add-sensor-cancel">' + t('btn.cancel') + '</button></div>' +
       '</div>';
   } else {
-    html += '<button type="button" class="secondary small" id="add-sensor-btn">+ датчик</button>';
+    html += '<button type="button" class="secondary small" id="add-sensor-btn">' + t('home.addSensor') + '</button>';
   }
   html += '</div>';
   return html;
 }
 
 function renderRatesCard() {
-  return '<div class="source-card" id="source-card-rates"><h3>Курсы</h3>' + statusLineHtml('rates') +
-    '<p class="hint">Публичные API без ключа — настраивать нечего.</p></div>';
+  return '<div class="source-card" id="source-card-rates"><h3>' + t('card.rates.title') + '</h3>' + statusLineHtml('rates') +
+    '<p class="hint">' + t('rates.hint') + '</p></div>';
 }
 
 function renderWeatherCard() {
-  var cityHint = '';
-  if (state.city && state.city !== state.city_resolved) {
-    cityHint = 'координаты определятся при подключении к сети';
-  } else if (state.city_lat || state.city_lon) {
-    cityHint = 'координаты: ' + state.city_lat.toFixed(4) + ', ' + state.city_lon.toFixed(4);
-  }
-  return '<div class="source-card" id="source-card-weather"><h3>Погода и часовой пояс</h3>' + statusLineHtml('weather') +
-    '<label>Город<input type="text" id="device-city" value="' + escapeAttr(state.city) + '" placeholder="Екатеринбург"></label>' +
-    '<p class="empty" id="city-hint">' + escapeHtml(cityHint) + '</p>' +
+  return '<div class="source-card" id="source-card-weather"><h3>' + t('card.weather.title') + '</h3>' + statusLineHtml('weather') +
+    '<label>' + t('weather.city') + '<input type="text" id="device-city" value="' + escapeAttr(state.city) + '" placeholder="' + t('weather.city.ph') + '"></label>' +
+    '<p class="empty" id="city-hint">' + escapeHtml(cityHintText()) + '</p>' +
     '</div>';
 }
 
@@ -923,29 +1184,29 @@ function renderWeatherCard() {
 // редактируется (map[] и привязка карточки завязаны на него).
 function renderCustomConnectors() {
   var customs = state.connectors.filter(function (c) { return !isFactoryId(c.id); });
-  if (customs.length === 0) return '<p class="empty">дополнительных источников нет</p>';
+  if (customs.length === 0) return '<p class="empty">' + t('custom.none') + '</p>';
   var html = '';
   customs.forEach(function (c) {
     // id — не рукописный, но приходит с устройства, а /api/config пишется из
     // любой сети: в атрибуты только через escapeAttr.
     var cid = escapeAttr(c.id);
     html += '<div class="connector-card">';
-    html += '<label>Идентификатор<input type="text" value="' + escapeAttr(c.id) + '" disabled></label>';
-    html += '<label>Адрес<input type="text" value="' + escapeAttr(c.url) + '" placeholder="https://example.com/data.json" data-conn-field="url" data-conn-id="' + cid + '"></label>';
-    html += '<p class="warning" id="hint-changed-' + cid + '" hidden>адрес изменился — введите токен заново, иначе он не сохранится</p>';
+    html += '<label>' + t('custom.id') + '<input type="text" value="' + escapeAttr(c.id) + '" disabled></label>';
+    html += '<label>' + t('field.url') + '<input type="text" value="' + escapeAttr(c.url) + '" placeholder="https://example.com/data.json" data-conn-field="url" data-conn-id="' + cid + '"></label>';
+    html += '<p class="warning" id="hint-changed-' + cid + '" hidden>' + t('hint.changed.token') + '</p>';
     html += '<div class="grid">';
-    html += '<label>Токен<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="' + cid + '"></label>';
-    html += '<label>Период, с<input type="number" min="5" value="' + c.interval + '" data-conn-field="interval" data-conn-id="' + cid + '"></label>';
+    html += '<label>' + t('field.token') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="' + cid + '"></label>';
+    html += '<label>' + t('custom.interval') + '<input type="number" min="5" value="' + c.interval + '" data-conn-field="interval" data-conn-id="' + cid + '"></label>';
     html += '</div>';
-    html += '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="' + c.id + '"' + (c.insecure ? ' checked' : '') + '><span>Не проверять сертификат (https)</span></div>';
-    html += '<p class="hint">Привязка слотов:</p>';
+    html += '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="' + c.id + '"' + (c.insecure ? ' checked' : '') + '><span>' + t('field.insecure') + '</span></div>';
+    html += '<p class="hint">' + t('custom.map') + '</p>';
     (c.map || []).forEach(function (m, mi) {
       html += '<div class="row"><select data-map-field="slot" data-conn-id="' + c.id + '" data-map-idx="' + mi + '">' + slotOptionsHtml(m.slot) + '</select>' +
-        '<input type="text" style="flex:1;margin:0 8px" value="' + escapeAttr(m.source) + '" placeholder="путь в JSON" data-map-field="source" data-conn-id="' + c.id + '" data-map-idx="' + mi + '">' +
+        '<input type="text" style="flex:1;margin:0 8px" value="' + escapeAttr(m.source) + '" placeholder="' + t('custom.path.ph') + '" data-map-field="source" data-conn-id="' + c.id + '" data-map-idx="' + mi + '">' +
         '<button type="button" class="small danger" data-remove-map data-conn-id="' + c.id + '" data-map-idx="' + mi + '">✕</button></div>';
     });
-    html += '<button type="button" class="secondary small" data-add-map data-conn-id="' + c.id + '">+ строка</button>';
-    html += '<button type="button" class="danger small full" data-remove-connector="' + c.id + '">Удалить источник</button>';
+    html += '<button type="button" class="secondary small" data-add-map data-conn-id="' + c.id + '">' + t('custom.addRow') + '</button>';
+    html += '<button type="button" class="danger small full" data-remove-connector="' + c.id + '">' + t('custom.remove') + '</button>';
     html += '</div>';
   });
   return html;
@@ -963,14 +1224,14 @@ function renderSources() {
 function renderNetworks() {
   var box = el('saved-networks');
   if (state.networks.length === 0) {
-    box.innerHTML = '<p class="empty">сохранённых сетей нет</p>';
+    box.innerHTML = '<p class="empty">' + t('net.none') + '</p>';
     return;
   }
   box.innerHTML = '';
   state.networks.forEach(function (n, i) {
     var row = document.createElement('div');
     row.className = 'row';
-    var lockNote = n.password ? 'новый пароль' : (n.password_set ? 'пароль сохранён' : 'открытая сеть');
+    var lockNote = n.password ? t('net.newPassword') : (n.password_set ? t('net.saved') : t('net.open'));
     row.innerHTML =
       '<span class="label">' + escapeHtml(n.ssid) + '</span>' +
       '<span class="meta">' + lockNote + '</span>' +
@@ -980,9 +1241,10 @@ function renderNetworks() {
 }
 
 function renderScanList(results) {
+  state.scanResults = results;
   var box = el('scan-list');
   if (!results || results.length === 0) {
-    box.innerHTML = '<p class="empty">сети не найдены</p>';
+    box.innerHTML = '<p class="empty">' + t('scan.none') + '</p>';
     return;
   }
   box.innerHTML = '';
@@ -992,7 +1254,7 @@ function renderScanList(results) {
     row.innerHTML =
       '<span class="label">' + (r.secure ? '🔒 ' : '') + escapeHtml(r.ssid) + '</span>' +
       '<span class="meta">' + signalBars(r.rssi) + '</span>' +
-      '<button type="button" class="small" data-pick-ssid="' + escapeHtml(r.ssid) + '" data-secure="' + (r.secure ? '1' : '0') + '">выбрать</button>';
+      '<button type="button" class="small" data-pick-ssid="' + escapeHtml(r.ssid) + '" data-secure="' + (r.secure ? '1' : '0') + '">' + t('scan.pick') + '</button>';
     box.appendChild(row);
   });
 }
@@ -1006,18 +1268,18 @@ function pollScan() {
   fetchJSON('/api/scan').then(function (res) {
     renderScanList(res.networks || []);
     if (res.scanning) {
-      setStatus('сканируем…');
+      setStatus(t('scan.scanning'));
       setTimeout(pollScan, 1500);
     } else {
       setStatus('');
     }
-  }).catch(function (err) { setStatus('сканирование не удалось: ' + err.message); });
+  }).catch(function (err) { setStatus(t('scan.failed', err.message)); });
 }
 
 function showAddForm(ssid, secure) {
   pendingSsid = ssid;
   pendingSecure = secure;
-  el('add-ssid-label').textContent = 'Пароль для «' + ssid + '»';
+  el('add-ssid-label').textContent = t('net.passwordFor', ssid);
   el('add-password').value = '';
   el('add-password').hidden = !secure;
   el('add-network-form').hidden = false;
@@ -1118,6 +1380,7 @@ function loadConfig() {
     state.city_resolved = cfg.city_resolved || '';
     state.city_lat = cfg.city_lat || 0;
     state.city_lon = cfg.city_lon || 0;
+    state.lang = cfg.lang === 'ru' ? 'ru' : 'en';
     state.networks = (cfg.networks || []).map(function (n) {
       return { ssid: n.ssid, password: '', password_set: !!n.password_set };
     });
@@ -1158,12 +1421,9 @@ function loadConfig() {
     }
 
     el('device-name').value = state.device_name;
-    updateDeviceNameHint(state.device_name);
-
-    renderNetworks();
-    renderSources();
-    renderDashboards();
+    el('lang').value = state.lang;
     state.loaded = true;
+    applyLang();
     el('save-btn').disabled = false;
   }).catch(function (e) {
     // Настройки не пришли — форму НЕ показываем как редактируемую: пустая
@@ -1172,7 +1432,7 @@ function loadConfig() {
     // «Сохранить» заблокирована до удачной загрузки.
     state.loaded = false;
     el('save-btn').disabled = true;
-    setStatus('не удалось загрузить настройки: ' + e.message + ' — обновите страницу');
+    setStatus(t('status.loadFailed', e.message));
   });
 }
 
@@ -1187,137 +1447,143 @@ function pollStatus() {
 // ── события ──
 
 document.addEventListener('click', function (e) {
-  var t = e.target;
+  var tgt = e.target;
 
-  if (t.id === 'scan-btn') {
-    setStatus('сканируем…');
+  if (tgt.id === 'scan-btn') {
+    setStatus(t('scan.scanning'));
     pollScan();
   }
-  if (t.dataset && t.dataset.pickSsid !== undefined) {
-    showAddForm(t.dataset.pickSsid, t.dataset.secure === '1');
+  if (tgt.dataset && tgt.dataset.pickSsid !== undefined) {
+    showAddForm(tgt.dataset.pickSsid, tgt.dataset.secure === '1');
   }
-  if (t.id === 'add-network-confirm') confirmAddNetwork();
-  if (t.id === 'add-network-cancel') { el('add-network-form').hidden = true; pendingSsid = null; }
-  if (t.dataset && t.dataset.removeNetwork !== undefined) {
-    state.networks.splice(Number(t.dataset.removeNetwork), 1);
+  if (tgt.id === 'add-network-confirm') confirmAddNetwork();
+  if (tgt.id === 'add-network-cancel') { el('add-network-form').hidden = true; pendingSsid = null; }
+  if (tgt.dataset && tgt.dataset.removeNetwork !== undefined) {
+    state.networks.splice(Number(tgt.dataset.removeNetwork), 1);
     renderNetworks();
   }
 
   // Экраны
-  if (t.dataset && t.dataset.tab !== undefined) {
-    state.currentTab = Number(t.dataset.tab);
+  if (tgt.dataset && tgt.dataset.tab !== undefined) {
+    state.currentTab = Number(tgt.dataset.tab);
     state.paletteRow = null;
     state.paletteSubType = null;
     renderDashboards();
   }
-  if (t.id === 'dash-active-radio') { state.activeDashboard = state.currentTab; }
-  if (t.dataset && t.dataset.addWidget !== undefined) {
-    var r = Number(t.dataset.row);
+  if (tgt.id === 'dash-active-radio') { state.activeDashboard = state.currentTab; }
+  if (tgt.dataset && tgt.dataset.addWidget !== undefined) {
+    var r = Number(tgt.dataset.row);
     state.paletteRow = (state.paletteRow === r) ? null : r;
     state.paletteSubType = null;
     renderDashboards();
   }
-  if (t.dataset && t.dataset.paletteClose !== undefined) {
+  if (tgt.dataset && tgt.dataset.paletteClose !== undefined) {
     state.paletteRow = null;
     state.paletteSubType = null;
     renderDashboards();
   }
-  if (t.dataset && t.dataset.paletteAdd !== undefined) {
-    handleAddPaletteType(t.dataset.paletteAdd, Number(t.dataset.row));
+  if (tgt.dataset && tgt.dataset.paletteAdd !== undefined) {
+    handleAddPaletteType(tgt.dataset.paletteAdd, Number(tgt.dataset.row));
   }
-  if (t.id === 'palette-confirm') confirmPaletteSubType();
-  if (t.id === 'palette-cancel') { state.paletteSubType = null; renderDashboards(); }
-  if (t.dataset && t.dataset.moveWidget !== undefined) {
-    moveWidget(Number(t.dataset.row), Number(t.dataset.idx), t.dataset.moveWidget);
+  if (tgt.id === 'palette-confirm') confirmPaletteSubType();
+  if (tgt.id === 'palette-cancel') { state.paletteSubType = null; renderDashboards(); }
+  if (tgt.dataset && tgt.dataset.moveWidget !== undefined) {
+    moveWidget(Number(tgt.dataset.row), Number(tgt.dataset.idx), tgt.dataset.moveWidget);
     renderDashboards();
   }
-  if (t.dataset && t.dataset.moveRow !== undefined) {
-    moveToOtherRow(Number(t.dataset.row), Number(t.dataset.idx));
+  if (tgt.dataset && tgt.dataset.moveRow !== undefined) {
+    moveToOtherRow(Number(tgt.dataset.row), Number(tgt.dataset.idx));
     renderDashboards();
   }
-  if (t.dataset && t.dataset.removeWidget !== undefined) {
-    removeWidget(Number(t.dataset.row), Number(t.dataset.idx));
+  if (tgt.dataset && tgt.dataset.removeWidget !== undefined) {
+    removeWidget(Number(tgt.dataset.row), Number(tgt.dataset.idx));
     renderDashboards();
   }
-  if (t.classList && t.classList.contains('source-status') && t.dataset.scrollCard) {
-    var target = document.getElementById('source-card-' + t.dataset.scrollCard);
+  if (tgt.classList && tgt.classList.contains('source-status') && tgt.dataset.scrollCard) {
+    var target = document.getElementById('source-card-' + tgt.dataset.scrollCard);
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   // Источники
-  if (t.id === 'add-sensor-btn') { state.addSensorOpen = true; renderSources(); }
-  if (t.id === 'add-sensor-cancel') { state.addSensorOpen = false; renderSources(); }
-  if (t.id === 'add-sensor-confirm') confirmAddSensor();
-  if (t.dataset && t.dataset.removeSensor !== undefined) removeSensor(Number(t.dataset.sensorIdx));
-  if (t.dataset && t.dataset.addMap !== undefined) addMapRow(t.dataset.connId);
-  if (t.dataset && t.dataset.removeMap !== undefined) removeMapRow(t.dataset.connId, Number(t.dataset.mapIdx));
-  if (t.id === 'add-custom-connector') addCustomConnector();
-  if (t.dataset && t.dataset.removeConnector !== undefined) removeConnector(t.dataset.removeConnector);
+  if (tgt.id === 'add-sensor-btn') { state.addSensorOpen = true; renderSources(); }
+  if (tgt.id === 'add-sensor-cancel') { state.addSensorOpen = false; renderSources(); }
+  if (tgt.id === 'add-sensor-confirm') confirmAddSensor();
+  if (tgt.dataset && tgt.dataset.removeSensor !== undefined) removeSensor(Number(tgt.dataset.sensorIdx));
+  if (tgt.dataset && tgt.dataset.addMap !== undefined) addMapRow(tgt.dataset.connId);
+  if (tgt.dataset && tgt.dataset.removeMap !== undefined) removeMapRow(tgt.dataset.connId, Number(tgt.dataset.mapIdx));
+  if (tgt.id === 'add-custom-connector') addCustomConnector();
+  if (tgt.dataset && tgt.dataset.removeConnector !== undefined) removeConnector(tgt.dataset.removeConnector);
 
-  if (t.id === 'save-btn') save();
-  if (t.id === 'reboot-btn') reboot();
+  if (tgt.id === 'save-btn') save();
+  if (tgt.id === 'reboot-btn') reboot();
 });
 
 function handleFieldChange(e) {
-  var t = e.target;
-  if (!t.dataset) return;
+  var tgt = e.target;
+  if (!tgt.dataset) return;
 
-  if (t.dataset.connField !== undefined && t.dataset.connId !== undefined) {
-    var c = conn(t.dataset.connId);
+  if (tgt.dataset.connField !== undefined && tgt.dataset.connId !== undefined) {
+    var c = conn(tgt.dataset.connId);
     if (!c) return;
-    var field = t.dataset.connField;
-    if (field === 'interval') c.interval = Number(t.value) || 300;
-    else if (field === 'insecure') c.insecure = t.checked;
-    else c[field] = t.value;
-    if (field === 'url' || field === 'insecure') updateChangedHint(t.dataset.connId);
+    var field = tgt.dataset.connField;
+    if (field === 'interval') c.interval = Number(tgt.value) || 300;
+    else if (field === 'insecure') c.insecure = tgt.checked;
+    else c[field] = tgt.value;
+    if (field === 'url' || field === 'insecure') updateChangedHint(tgt.dataset.connId);
     return;
   }
 
-  if (t.dataset.mapField !== undefined && t.dataset.connId !== undefined && t.dataset.mapIdx !== undefined) {
-    var c2 = conn(t.dataset.connId);
+  if (tgt.dataset.mapField !== undefined && tgt.dataset.connId !== undefined && tgt.dataset.mapIdx !== undefined) {
+    var c2 = conn(tgt.dataset.connId);
     if (!c2) return;
-    var m = c2.map[Number(t.dataset.mapIdx)];
+    var m = c2.map[Number(tgt.dataset.mapIdx)];
     if (!m) return;
-    m[t.dataset.mapField] = t.value;
+    m[tgt.dataset.mapField] = tgt.value;
     return;
   }
 
-  if (t.dataset.sensorField !== undefined && t.dataset.sensorIdx !== undefined) {
+  if (tgt.dataset.sensorField !== undefined && tgt.dataset.sensorIdx !== undefined) {
     var home = conn('home');
     if (!home) return;
-    var sm = home.map[Number(t.dataset.sensorIdx)];
+    var sm = home.map[Number(tgt.dataset.sensorIdx)];
     if (!sm) return;
-    sm[t.dataset.sensorField] = t.value;
+    sm[tgt.dataset.sensorField] = tgt.value;
     return;
   }
 
-  if (t.dataset.widgetField !== undefined) {
+  if (tgt.dataset.widgetField !== undefined) {
     var dash = currentDashboard();
     if (!dash) return;
-    var inst = dash.rows[Number(t.dataset.row)][Number(t.dataset.idx)];
+    var inst = dash.rows[Number(tgt.dataset.row)][Number(tgt.dataset.idx)];
     if (!inst) return;
-    var wfield = t.dataset.widgetField;
-    if (wfield === 'divider') inst.divider = t.checked;
-    else inst[wfield] = t.value;
+    var wfield = tgt.dataset.widgetField;
+    if (wfield === 'divider') inst.divider = tgt.checked;
+    else inst[wfield] = tgt.value;
     if (wfield === 'slot') renderDashboards();  // бейдж источника зависит от слота
     else drawPreview();
     return;
   }
 
-  if (t.id === 'dash-name') {
+  if (tgt.id === 'lang') {
+    state.lang = tgt.value === 'ru' ? 'ru' : 'en';
+    applyLang();
+    return;
+  }
+
+  if (tgt.id === 'dash-name') {
     var d = currentDashboard();
-    if (d) d.name = t.value;
+    if (d) d.name = tgt.value;
     drawPreview();
     return;
   }
 
-  if (t.id === 'palette-slot' && state.paletteSubType) { state.paletteSubType.slot = t.value; return; }
-  if (t.id === 'palette-label' && state.paletteSubType) { state.paletteSubType.label = t.value; return; }
+  if (tgt.id === 'palette-slot' && state.paletteSubType) { state.paletteSubType.slot = tgt.value; return; }
+  if (tgt.id === 'palette-label' && state.paletteSubType) { state.paletteSubType.label = tgt.value; return; }
 
-  if (t.id === 'add-sensor-slot') { el('add-sensor-custom').hidden = t.value !== '__custom'; return; }
+  if (tgt.id === 'add-sensor-slot') { el('add-sensor-custom').hidden = tgt.value !== '__custom'; return; }
 
-  if (t.id === 'device-city') { state.city = t.value; updateCityHint(); return; }
-  if (t.id === 'device-name') { updateDeviceNameHint(t.value); return; }
+  if (tgt.id === 'device-city') { state.city = tgt.value; updateCityHint(); return; }
+  if (tgt.id === 'device-name') { updateDeviceNameHint(tgt.value); return; }
 }
 // 'change' — для чекбоксов и select (не все браузеры шлют 'input' по клику
 // на checkbox одинаково надёжно), 'input' — для текстовых полей.
@@ -1328,13 +1594,14 @@ document.addEventListener('change', handleFieldChange);
 // «только из точки доступа» на странице больше нет, кнопки всегда активны.
 function save() {
   if (!state.loaded) {
-    setStatus('настройки ещё не загружены — обновите страницу');
+    setStatus(t('status.notLoaded'));
     return;
   }
   var payload = {
     device_name: el('device-name').value || 'tablo-setup',
     timezone_minutes: state.timezone_minutes,
-    city: state.city || 'Екатеринбург',
+    city: state.city,
+    lang: state.lang,
     networks: state.networks.map(function (n) { return { ssid: n.ssid, password: n.password || '' }; }),
     connectors: state.connectors.filter(function (c) { return c.id; }).map(function (c) {
       return {
@@ -1352,15 +1619,15 @@ function save() {
     payload.active_dashboard = state.activeDashboard;
   }
 
-  setStatus('сохраняем…');
+  setStatus(t('status.saving'));
   fetchJSON('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   }).then(function () {
-    setStatus('сохранено');
+    setStatus(t('status.saved'));
     return loadWidgetsCatalog().then(function () { return loadConfig(); });
-  }).catch(function (err) { setStatus('не сохранилось: ' + err.message); });
+  }).catch(function (err) { setStatus(t('status.saveFailed', err.message)); });
 }
 
 // slot/label — только непустые, divider — только true (экономия NVS, то же
@@ -1374,8 +1641,8 @@ function serializeInstance(inst) {
 }
 
 function reboot() {
-  if (!confirm('Перезагрузить устройство?')) return;
-  setStatus('перезагружаем…');
+  if (!confirm(t('reboot.confirm'))) return;
+  setStatus(t('status.rebooting'));
   // JSON-тело обязательно: устройство принимает reboot только как
   // application/json — иначе любая чужая страница могла бы перезагружать его
   // простой формой (CSRF), пока страница настройки открыта из той же сети.
@@ -1383,7 +1650,35 @@ function reboot() {
     .catch(function () {});
 }
 
+// Применяет state.lang: статическая разметка (data-i18n*), <html lang>, <title>,
+// затем перерисовка всего, что строится из JS. Вызывается при загрузке
+// конфига и при смене селекта языка.
+function applyLang() {
+  document.documentElement.lang = state.lang;
+  document.title = t('title');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-i18n]'), function (n) {
+    n.textContent = t(n.getAttribute('data-i18n'));
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-i18n-placeholder]'), function (n) {
+    n.setAttribute('placeholder', t(n.getAttribute('data-i18n-placeholder')));
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-i18n-title]'), function (n) {
+    n.setAttribute('title', t(n.getAttribute('data-i18n-title')));
+  });
+  if (pendingSsid) el('add-ssid-label').textContent = t('net.passwordFor', pendingSsid);
+  if (state.scanResults) renderScanList(state.scanResults);
+  // Динамические блоки строятся из state, который есть только после загрузки
+  // конфига (до неё в них «загрузка…» и пустые заглушки).
+  if (state.loaded) {
+    updateDeviceNameHint(el('device-name').value);
+    renderNetworks();
+    renderSources();
+    renderDashboards();
+  }
+}
+
 function boot() {
+  applyLang();
   loadWidgetsCatalog().then(function () { return loadConfig(); });
   pollStatus();
 }

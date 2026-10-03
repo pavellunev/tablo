@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+      - run: pip install platformio "esptool<5"
+      - name: Build firmware
+        run: pio run -e xiao-esp32s3
+      - name: Build settings page image
+        run: pio run -e xiao-esp32s3 -t buildfs
+      - name: Assemble binaries
+        run: |
+          set -euo pipefail
+          B=.pio/build/xiao-esp32s3
+          BOOT_APP0=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
+          mkdir -p dist
+          # Адреса: partitions.csv (app0 0x10000, littlefs 0x630000) и стандарт ESP32-S3.
+          esptool.py --chip esp32s3 merge_bin -o "dist/tablo-${TAG}-full.bin" \
+            --flash_mode qio --flash_size 8MB \
+            0x0 "$B/bootloader.bin" \
+            0x8000 "$B/partitions.bin" \
+            0xe000 "$BOOT_APP0" \
+            0x10000 "$B/firmware.bin" \
+            0x630000 "$B/littlefs.bin"
+          cp "$B/firmware.bin" "dist/tablo-${TAG}-firmware.bin"
+          cp "$B/littlefs.bin" "dist/tablo-${TAG}-littlefs.bin"
+          cd dist
+          sha256sum tablo-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Write release notes
+        run: |
+          cat > dist/notes.md <<NOTES
+          ## Flashing
+
+          One file at address \`0x0\` (bootloader, partitions, firmware and the setup page):
+
+          \`\`\`
+          esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 tablo-${TAG}-full.bin
+          \`\`\`
+
+          Without a command line: open https://web.esphome.io in Chrome, connect the board, choose \`tablo-${TAG}-full.bin\`.
+
+          Separate images: \`tablo-${TAG}-firmware.bin\` (application, \`0x10000\`),
+          \`tablo-${TAG}-littlefs.bin\` (setup page, \`0x630000\`).
+          NOTES
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: dist/notes.md
+          files: |
+            dist/tablo-${{ github.ref_name }}-full.bin
+            dist/tablo-${{ github.ref_name }}-firmware.bin
+            dist/tablo-${{ github.ref_name }}-littlefs.bin
+            dist/SHA256SUMS

@@ -20,6 +20,7 @@
 #include <string>
 
 #include "connectors.h"
+#include "i18n.h"
 
 namespace connectors {
 
@@ -591,7 +592,7 @@ String format_mail_time(uint32_t email_unix, uint32_t now, int16_t timezone_minu
 
     int64_t mail_days = days_from_civil(mail_civil.year, mail_civil.month, mail_civil.day);
     int64_t now_days = days_from_civil(now_civil.year, now_civil.month, now_civil.day);
-    if (now_days - mail_days == 1) return String("Вчера");
+    if (now_days - mail_days == 1) return String(i18n::tr(i18n::Str::kYesterday));
 
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%d.%02d", mail_civil.day, mail_civil.month);
@@ -690,7 +691,7 @@ String format_days_hours(uint32_t seconds_left) {
     uint32_t days = total_hours / 24;
     uint32_t hours = total_hours % 24;
     char buf[24];
-    std::snprintf(buf, sizeof(buf), "%u дн %u ч", static_cast<unsigned>(days),
+    std::snprintf(buf, sizeof(buf), i18n::tr(i18n::Str::kDaysHoursFmt), static_cast<unsigned>(days),
                   static_cast<unsigned>(hours));
     return String(buf);
 }
@@ -707,11 +708,11 @@ String format_claude_reset(uint32_t five_hour_reset, bool has_five, uint32_t wee
     if (!has_five && !has_week) return String("");
     std::string result;
     if (has_five) {
-        result += "5 ч через " + std::string(format_hm_countdown(seconds_until(five_hour_reset, now)).c_str());
+        result += std::string(i18n::tr(i18n::Str::kFiveHourReset)) + std::string(format_hm_countdown(seconds_until(five_hour_reset, now)).c_str());
     }
     if (has_week) {
         if (has_five) result += " · ";
-        result += "неделя через " + std::string(format_days_hours(seconds_until(week_reset, now)).c_str());
+        result += std::string(i18n::tr(i18n::Str::kWeekReset)) + std::string(format_days_hours(seconds_until(week_reset, now)).c_str());
     }
     return String(result.c_str());
 }
@@ -719,7 +720,7 @@ String format_claude_reset(uint32_t five_hour_reset, bool has_five, uint32_t wee
 String format_codex_reset(uint32_t reset_unix, uint32_t now, int16_t timezone_minutes) {
     CivilTime local = civil_from_unix(reset_unix, timezone_minutes);
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "неделя · сброс %02d:%02d · через %s", local.hour, local.minute,
+    std::snprintf(buf, sizeof(buf), i18n::tr(i18n::Str::kCodexResetFmt), local.hour, local.minute,
                   format_days_hours(seconds_until(reset_unix, now)).c_str());
     return String(buf);
 }
@@ -729,14 +730,14 @@ String format_codex_reset(uint32_t reset_unix, uint32_t now, int16_t timezone_mi
 const char* wmo_to_text(int code) {
     // Таблица WMO 4677, кратко — только то, что различает виджет «Сегодня»
     // (docs decisions/constructor не разбивают её мельче).
-    if (code == 0) return "ЯСНО";
-    if (code == 1) return "ОБЛАЧНО";
-    if (code == 2) return "ПЕР. ОБЛ.";
-    if (code == 3) return "ОБЛАЧНО";
-    if (code == 45 || code == 48) return "ТУМАН";
-    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "ДОЖДЬ";
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "СНЕГ";
-    if (code >= 95 && code <= 99) return "ГРОЗА";
+    if (code == 0) return i18n::tr(i18n::Str::kWmoClear);
+    if (code == 1) return i18n::tr(i18n::Str::kWmoCloudy);
+    if (code == 2) return i18n::tr(i18n::Str::kWmoPartlyCloudy);
+    if (code == 3) return i18n::tr(i18n::Str::kWmoCloudy);
+    if (code == 45 || code == 48) return i18n::tr(i18n::Str::kWmoFog);
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return i18n::tr(i18n::Str::kWmoRain);
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return i18n::tr(i18n::Str::kWmoSnow);
+    if (code >= 95 && code <= 99) return i18n::tr(i18n::Str::kWmoStorm);
     return "?";
 }
 
@@ -1246,13 +1247,13 @@ bool try_refresh(const config::Connector& c, uint32_t now, const char* token_url
     if (held != refresh_backoff_until_.end() && now < held->second) {
         Serial.printf("коннектор «%s»: токен протух, обновление отложено ещё на %u мин\n",
                       c.id.c_str(), static_cast<unsigned>((held->second - now + 59) / 60));
-        store.mark_failed(c.id, "токен протух, обновление отложено");
+        store.mark_failed(c.id, i18n::tr(i18n::Str::kTokenRefreshPostponed));
         return false;
     }
     const String refresh = refresh_token_for(c);
     if (refresh.length() == 0) {
         Serial.printf("коннектор «%s»: токен протух, refresh-токен не задан\n", c.id.c_str());
-        store.mark_failed(c.id, "токен протух — задайте refresh-токен на странице настройки");
+        store.mark_failed(c.id, i18n::tr(i18n::Str::kTokenNoRefresh));
         return false;
     }
     Serial.printf("коннектор «%s»: токен протух, обновляю через refresh_token\n", c.id.c_str());
@@ -1261,7 +1262,7 @@ bool try_refresh(const config::Connector& c, uint32_t now, const char* token_url
         refresh_backoff_until_[key] = now + 3600;
         Serial.printf("коннектор «%s»: обновить токен не удалось, следующая попытка через час\n",
                       c.id.c_str());
-        store.mark_failed(c.id, "токен протух — обновить не удалось, повтор через час");
+        store.mark_failed(c.id, i18n::tr(i18n::Str::kTokenRefreshFailed));
         return false;
     }
     refresh_backoff_until_.erase(key);
@@ -1374,7 +1375,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     }
     if (!client.connect(host.c_str(), port, REQUEST_TIMEOUT_MS)) {
         Serial.println("  imap: TLS-соединение не установлено (сеть, сертификат или таймаут)");
-        reason_out = "imap: нет TLS-соединения (сеть, сертификат или таймаут)";
+        reason_out = i18n::tr(i18n::Str::kImapNoTls);
         return false;
     }
 
@@ -1390,7 +1391,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a1 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: LOGIN отвергнут (логин или пароль приложения)");
-        reason_out = "imap: LOGIN отвергнут — проверьте адрес и пароль приложения";
+        reason_out = i18n::tr(i18n::Str::kImapLoginRejected);
         return false;
     }
 
@@ -1399,7 +1400,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a2 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: SELECT INBOX не удался");
-        reason_out = "imap: SELECT INBOX не удался";
+        reason_out = i18n::tr(i18n::Str::kImapSelectFailed);
         return false;
     }
 
@@ -1408,7 +1409,7 @@ bool imap_fetch_mailbox(const String& host, uint16_t port, const String& user,
     if (!imap_wait_tagged(client, "a3 ", lines, REQUEST_TIMEOUT_MS)) {
         client.stop();
         Serial.println("  imap: SEARCH UNSEEN не удался");
-        reason_out = "imap: SEARCH UNSEEN не удался";
+        reason_out = i18n::tr(i18n::Str::kImapSearchFailed);
         return false;
     }
 
@@ -1611,7 +1612,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 // писать обязательно: без строки здесь «почему пусто на
                 // экране» выясняется только разбором с кабелем.
                 Serial.printf("коннектор «%s»: источник не ответил\n", c.id.c_str());
-                store.mark_failed(c.id, "источник не ответил");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kSourceNoAnswer));
                 continue;
             }
             size_t taken = 0;
@@ -1669,7 +1670,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // неполученные значения просто не обновляются и стареют по ttl.
             if (succeeded == 0 && !c.map.empty()) {
                 Serial.printf("коннектор «%s»: ни один датчик не ответил\n", c.id.c_str());
-                store.mark_failed(c.id, "ни один датчик не ответил");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kNoSensorAnswer));
             } else {
                 Serial.printf("коннектор «%s»: получено значений %u из %u\n", c.id.c_str(),
                               static_cast<unsigned>(succeeded),
@@ -1703,7 +1704,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 slots::Slot five_hour, week;
                 if (!parse_claude_usage(body, five_hour, week)) {
                     Serial.printf("коннектор «%s»: не удалось разобрать ответ\n", c.id.c_str());
-                    store.mark_failed(c.id, "не удалось разобрать ответ");
+                    store.mark_failed(c.id, i18n::tr(i18n::Str::kParseFailed));
                 } else {
                     size_t taken = 0;
                     // Владелец хочет ОСТАТОК, не использование (как
@@ -1758,7 +1759,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 schedule_.hold(c.id, now + pause);
                 Serial.printf("коннектор «%s»: сервер просит подождать (429), пауза %u с\n",
                               c.id.c_str(), static_cast<unsigned>(pause));
-                store.mark_failed(c.id, "сервер просит подождать (429)");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kRateLimited));
             } else if (status == 403) {
                 // docs/decisions.md, п.8а: 403 у Anthropic — не про токен, а
                 // про то, что российский адрес отрезан целиком. Показать это
@@ -1766,12 +1767,12 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 // будет искать причину в токене, как искали мы сами.
                 Serial.printf("коннектор «%s»: недоступен из этой страны — нужен VPN\n",
                               c.id.c_str());
-                store.mark_failed(c.id, "недоступен из этой страны — нужен VPN");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kRegionBlocked));
             } else {
                 Serial.printf("коннектор «%s»: источник не ответил (код %d)\n", c.id.c_str(),
                               status);
-                char reason[48];
-                snprintf(reason, sizeof(reason), "источник не ответил (код %d)", status);
+                char reason[64];
+                snprintf(reason, sizeof(reason), i18n::tr(i18n::Str::kSourceNoAnswerCodeFmt), status);
                 store.mark_failed(c.id, reason);
             }
         } else if (c.kind == "codex") {
@@ -1795,7 +1796,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 slots::Slot limit;
                 if (!parse_codex_usage(body, limit)) {
                     Serial.printf("коннектор «%s»: не удалось разобрать ответ\n", c.id.c_str());
-                    store.mark_failed(c.id, "ответ не разобран");
+                    store.mark_failed(c.id, i18n::tr(i18n::Str::kParseFailed));
                 } else {
                     limit.number = remaining_percent(limit.number);
                     limit.text = format_number(limit.number);
@@ -1819,20 +1820,20 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                 // Сюда попадаем только после удачного refresh: новый токен и
                 // тот отвергнут — дело не в сроке жизни.
                 Serial.printf("коннектор «%s»: новый токен тоже отвергнут (401)\n", c.id.c_str());
-                store.mark_failed(c.id, "токен отвергнут — войдите в Codex заново");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kTokenRejected));
             } else if (status == 403) {
                 // docs/decisions.md, п.8а — тот же диагноз, что у Claude выше.
                 Serial.printf("коннектор «%s»: недоступен из этой страны — нужен VPN\n",
                               c.id.c_str());
-                store.mark_failed(c.id, "недоступен из этой страны — нужен VPN");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kRegionBlocked));
             } else {
                 Serial.printf("коннектор «%s»: источник не ответил (код %d)\n", c.id.c_str(),
                               status);
                 // Причина — на страницу тоже: без неё погасший блок выглядит
                 // как «данных нет», и владелец ищет ошибку в токене, а не в
                 // сети (так и вышло на живом 2026-09-21).
-                char reason[48];
-                snprintf(reason, sizeof(reason), "источник не ответил (код %d)", status);
+                char reason[64];
+                snprintf(reason, sizeof(reason), i18n::tr(i18n::Str::kSourceNoAnswerCodeFmt), status);
                 store.mark_failed(c.id, reason);
             }
         } else if (c.kind == "imap") {
@@ -1846,7 +1847,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             if (!imap_fetch_mailbox(c.url, 993, c.username, c.token, unread, recent, now,
                                     settings.timezone_minutes, kGtsRootR1Pem, reason)) {
                 Serial.printf("коннектор «%s»: почтовый сервер не ответил\n", c.id.c_str());
-                store.mark_failed(c.id, reason.length() > 0 ? reason : String("почтовый сервер не ответил"));
+                store.mark_failed(c.id, reason.length() > 0 ? reason : String(i18n::tr(i18n::Str::kMailNoAnswer)));
             } else {
                 slots::Slot value;
                 value.number = static_cast<float>(unread);
@@ -1867,7 +1868,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                         snprintf(id, sizeof(id), "mail.%u.%s", static_cast<unsigned>(i + 1), part);
                         slots::Slot gone;
                         gone.ok = false;
-                        gone.error = "нет письма";  // в /api/status это не отказ, а пустое место в списке
+                        gone.error = i18n::tr(i18n::Str::kNoMessage);  // в /api/status это не отказ, а пустое место в списке
                         gone.at = now;
                         store.put(String(id), gone, c.id);
                     }
@@ -1905,6 +1906,12 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
                               static_cast<unsigned>(recent.size()));
             }
         } else if (c.kind == "weather") {
+            // Город не задан (заводской дефолт пуст) — в сеть не ходим, блок
+            // «Сегодня» покажет причину.
+            if (settings.city.length() == 0) {
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kCityNotSet));
+                continue;
+            }
             // Координаты ещё не определены (город не геокодирован ни разу) —
             // не авария, а нормальное состояние до первого выхода в сеть
             // (docs/constructor.md, «Тонкость про режим точки доступа»).
@@ -1921,7 +1928,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             String body;
             if (!fetch(String(url), "", false, body)) {
                 Serial.printf("коннектор «%s»: источник не ответил\n", c.id.c_str());
-                store.mark_failed(c.id, "источник не ответил");
+                store.mark_failed(c.id, i18n::tr(i18n::Str::kSourceNoAnswer));
                 continue;
             }
 
